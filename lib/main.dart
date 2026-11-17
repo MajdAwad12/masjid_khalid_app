@@ -1,5 +1,5 @@
 import 'package:material_ui/material_ui.dart';
-
+import 'screens/announcements_page.dart';
 void main() {
   runApp(const MasjidApp());
 }
@@ -105,11 +105,7 @@ class _MainScreenState extends State<MainScreen> {
         managerName: supportManagerName,
         managerPhone: supportManagerPhone,
       ),
-      SectionPage(
-        title: 'الإعلانات',
-        icon: Icons.campaign_outlined,
-        description: 'آخر أخبار وإعلانات المسجد',
-      ),
+      AnnouncementsPage(isAdmin: true),
       SectionPage(
         title: 'الدورات',
         icon: Icons.school_outlined,
@@ -268,12 +264,6 @@ class HomePage extends StatelessWidget {
                       const SizedBox(height: 22),
                       SpiritualCard(message: message!),
                     ],
-                    const Spacer(),
-                    const SizedBox(height: 20),
-                    SupportFooter(
-                      managerName: managerName,
-                      managerPhone: managerPhone,
-                    ),
                   ],
                 ),
               ),
