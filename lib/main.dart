@@ -1,6 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 import 'screens/announcements_page.dart';
-void main() {
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'auth/auth_gate.dart';
+import 'screens/account_settings_page.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const MasjidApp());
 }
 
@@ -73,7 +84,9 @@ class MasjidApp extends StatelessWidget {
         textDirection: TextDirection.rtl,
         child: child!,
       ),
-      home: const MainScreen(),
+      home: AuthGate(
+        appBuilder: (_) => const MainScreen(),
+      ),
     );
   }
 }
@@ -99,7 +112,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const pages = <Widget>[
+    final pages = <Widget>[
       HomePage(
         message: homeSpiritualMessage,
         managerName: supportManagerName,
@@ -121,10 +134,27 @@ class _MainScreenState extends State<MainScreen> {
         icon: Icons.play_circle_outline,
         description: 'دروس ومحاضرات المسجد المسجلة',
       ),
-      SectionPage(
-        title: 'الإعدادات',
-        icon: Icons.settings_outlined,
-        description: 'إعدادات الحساب والتطبيق',
+      FutureBuilder<IdTokenResult>(
+        future: FirebaseAuth.instance.currentUser?.getIdTokenResult(true),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(
+              child: Text('تعذر التحقق من صلاحيات الحساب'),
+            );
+          }
+
+          if (!snapshot.hasData) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
+
+          final isAdmin = snapshot.data!.claims?['admin'] == true;
+
+          return AccountSettingsPage(
+            isAdmin: isAdmin,
+          );
+        },
       ),
     ];
 
