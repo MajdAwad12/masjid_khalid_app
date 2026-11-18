@@ -1,0 +1,84 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.admin == true
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == 'admin';
+    }
+
+    function validProfile(data) {
+      return data.firstName is string
+        && data.firstName.size() > 0
+        && data.firstName.size() <= 80
+        && data.lastName is string
+        && data.lastName.size() > 0
+        && data.lastName.size() <= 80
+        && data.phone is string
+        && data.phone.matches('^[+]?[0-9]{8,15}$')
+        && data.city is string
+        && data.city.size() > 0
+        && data.city.size() <= 100
+        && data.age is int
+        && data.age >= 1
+        && data.age <= 120;
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn()
+        && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll([
+          'firstName', 'lastName', 'username', 'phone',
+          'age', 'city', 'role', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'firstName', 'lastName', 'username', 'phone',
+          'age', 'city', 'role', 'createdAt'
+        ])
+        && validProfile(request.resource.data)
+        && request.resource.data.role == 'user'
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[a-z0-9_]{3,20}$')
+        && request.auth.token.email ==
+          request.resource.data.username + '@accounts.masjid-khalid.example'
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firstName', 'lastName', 'phone', 'age', 'city'
+        ])
+        && validProfile(request.resource.data);
+
+      allow delete: if false;
+    }
+
+    // Reset-cooldown timestamps are visible only to active admins.
+    // Only Cloud Functions (Admin SDK) may write these documents.
+    match /security_password_reset_limits/{uid} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+  }
+}

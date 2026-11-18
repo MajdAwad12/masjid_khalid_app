@@ -1,4 +1,3 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -17,20 +16,14 @@ class AnnouncementsPage extends StatefulWidget {
   // Admin actions will be connected after Firebase Authentication.
   final bool isAdmin;
 
-  const AnnouncementsPage({
-    super.key,
-    this.isAdmin = false,
-  });
+  const AnnouncementsPage({super.key, this.isAdmin = false});
 
   @override
-  State<AnnouncementsPage> createState() =>
-      _AnnouncementsPageState();
+  State<AnnouncementsPage> createState() => _AnnouncementsPageState();
 }
 
-class _AnnouncementsPageState
-    extends State<AnnouncementsPage> {
-  late final Stream<QuerySnapshot<Map<String, dynamic>>>
-  _announcementsStream;
+class _AnnouncementsPageState extends State<AnnouncementsPage> {
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _announcementsStream;
 
   @override
   void initState() {
@@ -48,10 +41,7 @@ class _AnnouncementsPageState
       stream: _announcementsStream,
       builder: (context, snapshot) {
         return ListView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 24,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           children: [
             const Center(
               child: Column(
@@ -100,19 +90,17 @@ class _AnnouncementsPageState
                 ),
               )
             else if (snapshot.data!.docs.isEmpty)
-                const _StatusMessage(
-                  icon: Icons.inbox_outlined,
-                  message: 'لا توجد إعلانات حاليًا',
-                )
-              else
-                ...snapshot.data!.docs.map(
-                      (document) => Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: AnnouncementCard(
-                      data: document.data(),
-                    ),
-                  ),
+              const _StatusMessage(
+                icon: Icons.inbox_outlined,
+                message: 'لا توجد إعلانات حاليًا',
+              )
+            else
+              ...snapshot.data!.docs.map(
+                (document) => Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: AnnouncementCard(data: document.data()),
                 ),
+              ),
           ],
         );
       },
@@ -124,20 +112,15 @@ class _AnnouncementsPageState
 class AnnouncementCard extends StatelessWidget {
   final Map<String, dynamic> data;
 
-  const AnnouncementCard({
-    super.key,
-    required this.data,
-  });
+  const AnnouncementCard({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {
     final title = (data['title'] ?? '').toString();
-    final description =
-    (data['description'] ?? '').toString();
+    final description = (data['description'] ?? '').toString();
 
     final isImportant = data['isImportant'] == true;
-    final imageUrl =
-    (data['imageUrl'] ?? '').toString().trim();
+    final imageUrl = (data['imageUrl'] ?? '').toString().trim();
 
     final publishedAt = data['publishedAt'];
 
@@ -172,10 +155,7 @@ class AnnouncementCard extends StatelessWidget {
         children: [
           if (isImportant) ...[
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 6,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: AnnouncementColors.paleGold,
                 borderRadius: BorderRadius.circular(24),
@@ -227,9 +207,7 @@ class AnnouncementCard extends StatelessWidget {
                     child: Center(
                       child: Text(
                         'تعذر عرض الصورة',
-                        style: TextStyle(
-                          color: AnnouncementColors.muted,
-                        ),
+                        style: TextStyle(color: AnnouncementColors.muted),
                       ),
                     ),
                   );
@@ -240,9 +218,7 @@ class AnnouncementCard extends StatelessWidget {
 
           if (formattedDate.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Divider(
-              color: AnnouncementColors.border,
-            ),
+            const Divider(color: AnnouncementColors.border),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -273,10 +249,7 @@ class _StatusMessage extends StatelessWidget {
   final IconData icon;
   final String message;
 
-  const _StatusMessage({
-    required this.icon,
-    required this.message,
-  });
+  const _StatusMessage({required this.icon, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -285,11 +258,7 @@ class _StatusMessage extends StatelessWidget {
       child: Center(
         child: Column(
           children: [
-            Icon(
-              icon,
-              size: 55,
-              color: AnnouncementColors.gold,
-            ),
+            Icon(icon, size: 55, color: AnnouncementColors.gold),
             const SizedBox(height: 16),
             Text(
               message,

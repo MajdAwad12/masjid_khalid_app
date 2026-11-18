@@ -1,46 +1,61 @@
-import 'package:material_ui/material_ui.dart';
-import 'screens/announcements_page.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'package:material_ui/material_ui.dart';
+
 import 'auth/auth_gate.dart';
+import 'firebase_options.dart';
 import 'screens/account_settings_page.dart';
+import 'screens/announcements_page.dart';
+import 'widgets/app_theme.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart'
+    show kDebugMode, defaultTargetPlatform, TargetPlatform;
+
+// Keep existing screens that import main.dart for AppColors working.
+export 'widgets/app_theme.dart' show AppColors;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Enable local Firebase Emulators only when explicitly requested.
+  const useEmulators = bool.fromEnvironment(
+    'USE_FIREBASE_EMULATORS',
+    defaultValue: false,
   );
+
+  if (useEmulators) {
+    if (!kDebugMode) {
+      throw StateError('Firebase Emulators are allowed only in debug mode.');
+    }
+
+    // Android emulator accesses the computer through 10.0.2.2.
+    final host = defaultTargetPlatform == TargetPlatform.android
+        ? '10.0.2.2'
+        : 'localhost';
+
+    await FirebaseAuth.instance.useAuthEmulator(host, 9099);
+
+    FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
+
+    FirebaseFunctions.instanceFor(region: 'us-central1')
+        .useFunctionsEmulator(host, 5001);
+  }
 
   runApp(const MasjidApp());
 }
 
-// Shared visual language inspired by the mosque's existing website.
-class AppColors {
-  static const background = Color(0xFFFAF8F1);
-  static const surface = Color(0xFFFFFEFC);
-  static const gold = Color(0xFFA16602);
-  static const softGold = Color(0xFFEBB44C);
-  static const paleGold = Color(0xFFF5EACF);
-  static const dark = Color(0xFF342F27);
-  static const muted = Color(0xFF756C5D);
-  static const border = Color(0xFFE9DFC9);
-  // Soft sage green reserved for the mosque arch on the home page.
-  static const sageBackground = Color(0xFFF0F6EE);
-  static const sageBorder = Color(0xFF9BB59B);
-  static const sageDetails = Color(0xFF6F936F);
-}
-
-// Eventually the administrator will manage this item through Firebase.
-// Set this to null to hide the spiritual-content section completely.
-const SpiritualMessage? homeSpiritualMessage = SpiritualMessage(
+// Spiritual content displayed on the home page.
+const SpiritualMessage homeSpiritualMessage = SpiritualMessage(
   kind: SpiritualKind.quran,
   content: 'فَإِنَّ مَعَ الْعُسْرِ يُسْرًا',
   source: 'سورة الشرح، الآية ٥',
 );
 
-// These are placeholders, NOT confirmed contact details.
-// Replace them with the verified mosque administrator's details.
+// Replace with verified mosque contact information.
 const String supportManagerName = 'يُضاف اسم المسؤول لاحقًا';
 const String supportManagerPhone = 'يُضاف رقم الهاتف لاحقًا';
 
@@ -58,6 +73,7 @@ class SpiritualMessage {
   });
 }
 
+// Application entry point.
 class MasjidApp extends StatelessWidget {
   const MasjidApp({super.key});
 
@@ -66,33 +82,31 @@ class MasjidApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'مسجد خالد بن الوليد',
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.background,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.gold,
-          surface: AppColors.background,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.background,
-          foregroundColor: AppColors.dark,
-          centerTitle: true,
-          elevation: 0,
-        ),
-      ),
-      builder: (context, child) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: child!,
-      ),
+
+      // Centralized application theme.
+      theme: AppTheme.lightTheme,
+
+      // Arabic right-to-left layout.
+      builder: (context, child) {
+        return Directionality(textDirection: TextDirection.rtl, child: child!);
+      },
+
+      // Firebase decides whether the user is signed in
+      // and whether the user has admin permissions.
       home: AuthGate(
-        appBuilder: (_) => const MainScreen(),
+        appBuilder: (isAdmin) {
+          return MainScreen(isAdmin: isAdmin);
+        },
       ),
     );
   }
 }
 
+// Main application screen.
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final bool isAdmin;
+
+  const MainScreen({super.key, required this.isAdmin});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -101,7 +115,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int selectedIndex = 0;
 
-  static const titles = <String>[
+  static const List<String> titles = [
     'الرئيسية',
     'الإعلانات',
     'الدورات',
@@ -112,64 +126,48 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = <Widget>[
+    final List<Widget> pages = [
       HomePage(
         message: homeSpiritualMessage,
         managerName: supportManagerName,
         managerPhone: supportManagerPhone,
       ),
-      AnnouncementsPage(isAdmin: true),
-      SectionPage(
+
+      // Admin permissions come from Firebase Custom Claims.
+      AnnouncementsPage(isAdmin: widget.isAdmin),
+
+      const SectionPage(
         title: 'الدورات',
         icon: Icons.school_outlined,
         description: 'الدورات المتاحة والتسجيل فيها',
       ),
-      SectionPage(
+
+      const SectionPage(
         title: 'الأنشطة',
         icon: Icons.calendar_month_outlined,
         description: 'الفعاليات والمحاضرات القادمة',
       ),
-      SectionPage(
+
+      const SectionPage(
         title: 'الدروس المسجلة',
         icon: Icons.play_circle_outline,
         description: 'دروس ومحاضرات المسجد المسجلة',
       ),
-      FutureBuilder<IdTokenResult>(
-        future: FirebaseAuth.instance.currentUser?.getIdTokenResult(true),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(
-              child: Text('تعذر التحقق من صلاحيات الحساب'),
-            );
-          }
 
-          if (!snapshot.hasData) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          final isAdmin = snapshot.data!.claims?['admin'] == true;
-
-          return AccountSettingsPage(
-            isAdmin: isAdmin,
-          );
-        },
-      ),
+      AccountSettingsPage(isAdmin: widget.isAdmin),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        // The home screen has its own heading: avoid repeating it in the app bar.
         title: selectedIndex == 0
             ? null
             : Text(
-          titles[selectedIndex],
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+                titles[selectedIndex],
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
         actions: [
           IconButton(
             tooltip: 'الإشعارات',
@@ -185,18 +183,21 @@ class _MainScreenState extends State<MainScreen> {
           const SizedBox(width: 6),
         ],
       ),
+
       body: IndexedStack(index: selectedIndex, children: pages),
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: selectedIndex,
         type: BottomNavigationBarType.fixed,
-        backgroundColor: AppColors.surface,
-        selectedItemColor: AppColors.gold,
-        unselectedItemColor: AppColors.muted,
         selectedFontSize: 10,
         unselectedFontSize: 9,
         iconSize: 21,
         showUnselectedLabels: true,
-        onTap: (index) => setState(() => selectedIndex = index),
+        onTap: (index) {
+          setState(() {
+            selectedIndex = index;
+          });
+        },
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
@@ -229,7 +230,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// A deliberately calm home page with NO duplicate navigation buttons.
+// Main home page.
 class HomePage extends StatelessWidget {
   final SpiritualMessage? message;
   final String managerName;
@@ -266,10 +267,13 @@ class HomePage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // The supplied mosque image replaces the previous drawn arch completely.
+
                     const SizedBox(height: 10),
+
                     const MosqueImageHero(),
+
                     const SizedBox(height: 12),
+
                     const Text(
                       'السلام عليكم ورحمة الله وبركاته',
                       textAlign: TextAlign.center,
@@ -280,7 +284,9 @@ class HomePage extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+
                     const SizedBox(height: 5),
+
                     const Text(
                       'منارةٌ للعلم، ومأوى للقلوب',
                       textAlign: TextAlign.center,
@@ -290,6 +296,7 @@ class HomePage extends StatelessWidget {
                         height: 1.7,
                       ),
                     ),
+
                     if (message != null) ...[
                       const SizedBox(height: 22),
                       SpiritualCard(message: message!),
@@ -305,9 +312,7 @@ class HomePage extends StatelessWidget {
   }
 }
 
-// The supplied illustration is a local image asset, not a drawn arch.
-// BoxFit.contain keeps the entire illustration visible, without cropping.
-
+// Mosque image displayed on the home page.
 class MosqueImageHero extends StatelessWidget {
   const MosqueImageHero({super.key});
 
@@ -327,16 +332,13 @@ class MosqueImageHero extends StatelessWidget {
           filterQuality: FilterQuality.high,
           semanticLabel: 'شعار مسجد خالد بن الوليد',
         ),
-
         const SizedBox(height: 8),
-
-
       ],
     );
   }
 }
 
-
+// Quran verse or Hadith card.
 class SpiritualCard extends StatelessWidget {
   final SpiritualMessage message;
 
@@ -365,7 +367,9 @@ class SpiritualCard extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+
           const SizedBox(height: 8),
+
           Text(
             message.content,
             textAlign: TextAlign.center,
@@ -376,14 +380,13 @@ class SpiritualCard extends StatelessWidget {
               height: 1.7,
             ),
           ),
+
           const SizedBox(height: 8),
+
           Text(
             message.source,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.muted,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
         ],
       ),
@@ -391,6 +394,7 @@ class SpiritualCard extends StatelessWidget {
   }
 }
 
+// Contact and support information.
 class SupportFooter extends StatelessWidget {
   final String managerName;
   final String managerPhone;
@@ -417,7 +421,9 @@ class SupportFooter extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(color: AppColors.muted, fontSize: 12),
           ),
+
           const SizedBox(height: 7),
+
           Text(
             'مسؤول النظام: $managerName',
             textAlign: TextAlign.center,
@@ -427,7 +433,9 @@ class SupportFooter extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+
           const SizedBox(height: 4),
+
           Text(
             'رقم الهاتف: $managerPhone',
             textAlign: TextAlign.center,
@@ -439,7 +447,7 @@ class SupportFooter extends StatelessWidget {
   }
 }
 
-// Other tabs are intentionally placeholders until their dedicated screens are built.
+// Temporary page for features not yet implemented.
 class SectionPage extends StatelessWidget {
   final String title;
   final String description;
@@ -461,7 +469,9 @@ class SectionPage extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, size: 60, color: AppColors.gold),
+
             const SizedBox(height: 16),
+
             Text(
               title,
               style: const TextStyle(
@@ -470,14 +480,13 @@ class SectionPage extends StatelessWidget {
                 color: AppColors.dark,
               ),
             ),
+
             const SizedBox(height: 8),
+
             Text(
               description,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.muted,
-                fontSize: 15,
-              ),
+              style: const TextStyle(color: AppColors.muted, fontSize: 15),
             ),
           ],
         ),
@@ -486,6 +495,7 @@ class SectionPage extends StatelessWidget {
   }
 }
 
+// Notifications page.
 class NotificationsPage extends StatelessWidget {
   const NotificationsPage({super.key});
 
@@ -499,12 +509,10 @@ class NotificationsPage extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.notifications_none,
-                size: 64,
-                color: AppColors.gold,
-              ),
+              Icon(Icons.notifications_none, size: 64, color: AppColors.gold),
+
               SizedBox(height: 17),
+
               Text(
                 'لا توجد إشعارات حتى الآن',
                 textAlign: TextAlign.center,
@@ -514,14 +522,13 @@ class NotificationsPage extends StatelessWidget {
                   color: AppColors.dark,
                 ),
               ),
+
               SizedBox(height: 10),
+
               Text(
                 'ستظهر هنا إشعارات الدورات وأخبار المسجد',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.muted,
-                ),
+                style: TextStyle(fontSize: 14, color: AppColors.muted),
               ),
             ],
           ),
