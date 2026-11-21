@@ -66,7 +66,7 @@ class _UsersManagementInterfacePageState
 
     setState(() {
       _localResetAvailableAt[uid] = DateTime.now().add(
-        const Duration(seconds: 60),
+        const Duration(seconds: 120),
       );
     });
   }

@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../auth/auth_service.dart';
 import '../widgets/app_theme.dart';
+import '../widgets/admin_recovery_email_card.dart';
 import 'users_management_interface_page.dart';
 
 // Account settings for regular users and administrators.
@@ -135,10 +136,9 @@ class AccountSettingsPage extends StatelessWidget {
 
             const SizedBox(height: 14),
 
-
-
-            // Administrator-only user management.
+            // Verified recovery email is required for each administrator.
             if (isAdmin) ...[
+              const AdminRecoveryEmailCard(),
               const SizedBox(height: 25),
 
               const Text(

@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../auth/auth_service.dart';
+import 'forgot_password_page.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_text_field.dart';
@@ -180,7 +181,27 @@ class _LoginPageState extends State<LoginPage> {
                       },
                     ),
 
-                    const SizedBox(height: 26),
+                    const SizedBox(height: 10),
+
+                    // Password recovery is separate for users and admins.
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: TextButton(
+                        onPressed: _working
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (context) =>
+                                        const ForgotPasswordPage(),
+                                  ),
+                                );
+                              },
+                        child: const Text('نسيت كلمة المرور؟'),
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
 
                     // Shared login button with loading state.
                     AppButton(

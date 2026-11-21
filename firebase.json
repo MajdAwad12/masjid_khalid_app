@@ -1,58 +1,61 @@
 {
-    "flutter":  {
-                    "platforms":  {
-                                      "android":  {
-                                                      "default":  {
-                                                                      "projectId":  "masjid-khalid-app",
-                                                                      "appId":  "1:461885045406:android:3a22be4bb0d829e0bf598f",
-                                                                      "fileOutput":  "android/app/google-services.json"
-                                                                  }
-                                                  },
-                                      "dart":  {
-                                                   "lib/firebase_options.dart":  {
-                                                                                     "projectId":  "masjid-khalid-app",
-                                                                                     "configurations":  {
-                                                                                                            "android":  "1:461885045406:android:3a22be4bb0d829e0bf598f",
-                                                                                                            "ios":  "1:461885045406:ios:a6c9714823e90f11bf598f"
-                                                                                                        }
-                                                                                 }
-                                               }
-                                  }
-                },
-    "functions":  [
-                      {
-                          "source":  "functions",
-                          "codebase":  "default",
-                          "disallowLegacyRuntimeConfig":  true,
-                          "ignore":  [
-                                         "node_modules",
-                                         ".git",
-                                         "firebase-debug.log",
-                                         "firebase-debug.*.log",
-                                         "*.local"
-                                     ],
-                          "predeploy":  [
-                                            "npm --prefix \"$RESOURCE_DIR\" run lint"
-                                        ]
-                      }
-                  ],
-    "emulators":  {
-                      "auth":  {
-                                   "port":  9099
-                               },
-                      "functions":  {
-                                        "port":  5001
-                                    },
-                      "firestore":  {
-                                        "port":  8080
-                                    },
-                      "ui":  {
-                                 "enabled":  true,
-                                 "port":  4000
-                             },
-                      "singleProjectMode":  true
-                  },
-    "firestore":  {
-                      "rules":  "firestore.rules"
-                  }
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "masjid-khalid-app",
+          "appId": "1:461885045406:android:3a22be4bb0d829e0bf598f",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "masjid-khalid-app",
+          "configurations": {
+            "android": "1:461885045406:android:3a22be4bb0d829e0bf598f",
+            "ios": "1:461885045406:ios:a6c9714823e90f11bf598f"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "disallowLegacyRuntimeConfig": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint"
+      ]
+    }
+  ],
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
 }

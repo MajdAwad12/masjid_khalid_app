@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.admin == true;
+    }
+
+    // Images attached to mosque announcements.
+    // Reading individual images is public because announcements are public.
+    match /announcements/{announcementId}/images/{fileName} {
+      allow get: if true;
+      allow list: if false;
+
+      // Only administrators can upload or replace images (maximum 5 MiB).
+      allow create, update: if isAdmin()
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+
+      allow delete: if isAdmin();
+    }
+
+    // All other Storage files are inaccessible through client SDKs.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
