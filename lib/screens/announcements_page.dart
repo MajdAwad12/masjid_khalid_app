@@ -6,6 +6,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../widgets/masjid_section_style.dart';
+
 // Colors used by the existing mosque application.
 class AnnouncementColors {
   static const gold = Color(0xFFA16602);
@@ -115,93 +117,62 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _announcementsStream,
       builder: (context, snapshot) {
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          children: [
-            const Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.campaign_outlined,
-                    size: 42,
-                    color: AnnouncementColors.gold,
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 750),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(18, 22, 18, 28),
+              children: [
+                const MosqueSectionHeader(
+                  emoji: '📢',
+                  title: 'إعلانات المسجد',
+                  subtitle: 'تابع آخر الإعلانات والمستجدات',
+                  accent: MosquePalette.amber,
+                ),
+                const SizedBox(height: 24),
+                if (widget.isAdmin) ...[
+                  FilledButton.icon(
+                    onPressed: _deletingId == null ? () => _openEditor() : null,
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('إضافة إعلان جديد'),
                   ),
-                  SizedBox(height: 12),
-                  Text(
-                    'إعلانات المسجد',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AnnouncementColors.dark,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'تابع آخر الإعلانات والمستجدات',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: AnnouncementColors.muted,
-                    ),
-                  ),
+                  const SizedBox(height: 24),
                 ],
-              ),
+                if (snapshot.hasError)
+                  const _StatusMessage(
+                    icon: Icons.error_outline,
+                    message: 'تعذر تحميل الإعلانات، حاول لاحقًا',
+                  )
+                else if (!snapshot.hasData)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 60),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (snapshot.data!.docs.isEmpty)
+                  const _StatusMessage(
+                    icon: Icons.inbox_outlined,
+                    message: 'لا توجد إعلانات حاليًا',
+                  )
+                else
+                  ...snapshot.data!.docs.map(
+                    (document) => Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: AnnouncementCard(
+                        data: document.data(),
+                        isAdmin: widget.isAdmin,
+                        isDeleting: _deletingId == document.id,
+                        onEdit: _deletingId == null
+                            ? () => _openEditor(document: document)
+                            : null,
+                        onDelete: _deletingId == null
+                            ? () => _deleteAnnouncement(document)
+                            : null,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(height: 24),
-            if (widget.isAdmin) ...[
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _deletingId == null ? () => _openEditor() : null,
-                  icon: const Icon(Icons.add_circle_outline),
-                  label: const Text('إضافة إعلان جديد'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AnnouncementColors.gold,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ] else
-              const SizedBox(height: 6),
-            if (snapshot.hasError)
-              const _StatusMessage(
-                icon: Icons.error_outline,
-                message: 'تعذر تحميل الإعلانات، حاول لاحقًا',
-              )
-            else if (!snapshot.hasData)
-              const Padding(
-                padding: EdgeInsets.only(top: 60),
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: AnnouncementColors.gold,
-                  ),
-                ),
-              )
-            else if (snapshot.data!.docs.isEmpty)
-              const _StatusMessage(
-                icon: Icons.inbox_outlined,
-                message: 'لا توجد إعلانات حاليًا',
-              )
-            else
-              ...snapshot.data!.docs.map(
-                (document) => Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: AnnouncementCard(
-                    data: document.data(),
-                    isAdmin: widget.isAdmin,
-                    isDeleting: _deletingId == document.id,
-                    onEdit: _deletingId == null
-                        ? () => _openEditor(document: document)
-                        : null,
-                    onDelete: _deletingId == null
-                        ? () => _deleteAnnouncement(document)
-                        : null,
-                  ),
-                ),
-              ),
-          ],
+          ),
         );
       },
     );
@@ -227,157 +198,188 @@ class AnnouncementCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final title = (data['title'] ?? '').toString();
     final description = (data['description'] ?? '').toString();
     final isImportant = data['isImportant'] == true;
     final imageUrl = (data['imageUrl'] ?? '').toString().trim();
     final publishedAt = data['publishedAt'];
-    final DateTime? date = publishedAt is Timestamp
-        ? publishedAt.toDate()
+    final DateTime? publishedDate = publishedAt is Timestamp
+        ? publishedAt.toDate().toLocal()
         : null;
-    final formattedDate = date == null
-        ? ''
-        : '${date.day}/${date.month}/${date.year}';
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isImportant
-              ? const Color(0xFFE3C991)
-              : AnnouncementColors.border,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
+    String twoDigits(int number) => number.toString().padLeft(2, '0');
+
+    return MosqueCardShell(
+      accent: MosquePalette.amber,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header: important badge on the right, admin actions on the left.
-          if (isImportant || isAdmin) ...[
-            Row(
-              textDirection: TextDirection.rtl,
+          Container(height: 5, color: MosquePalette.amber),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (isImportant)
+                if (isImportant || isAdmin) ...[
+                  Row(
+                    textDirection: TextDirection.rtl,
+                    children: [
+                      if (isImportant)
+                        MosqueTag(
+                          text: 'إعلان مهم',
+                          color: isDark
+                              ? const Color(0xFFFFD700)
+                              : MosquePalette.amber,
+                          icon: Icons.star_outline_rounded,
+                        ),
+                      if (isAdmin) ...[
+                        const Spacer(),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'تعديل الإعلان',
+                              onPressed: onEdit,
+                              icon: const Icon(Icons.edit_outlined, size: 21),
+                              color: MosquePalette.amber,
+                            ),
+                            IconButton(
+                              tooltip: 'حذف الإعلان',
+                              onPressed: onDelete,
+                              icon: isDeleting
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.delete_outline, size: 21),
+                              color: scheme.error,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 22,
+                    height: 1.35,
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                if (description.trim().isNotEmpty) ...[
+                  const SizedBox(height: 13),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AnnouncementColors.paleGold,
-                      borderRadius: BorderRadius.circular(24),
+                      color: MosquePalette.amber.withValues(
+                        alpha: isDark ? .12 : .075,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Text(
-                      'إعلان مهم',
+                    child: Text(
+                      description,
                       style: TextStyle(
-                        color: AnnouncementColors.gold,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        height: 1.7,
+                        fontWeight: FontWeight.w500,
+                        color: scheme.onSurface,
                       ),
                     ),
                   ),
-                if (isAdmin) ...[
-                  const Spacer(),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'تعديل الإعلان',
-                        onPressed: onEdit,
-                        icon: const Icon(Icons.edit_outlined, size: 21),
-                        color: AnnouncementColors.gold,
-                      ),
-                      IconButton(
-                        tooltip: 'حذف الإعلان',
-                        onPressed: onDelete,
-                        icon: isDeleting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.delete_outline, size: 21),
-                        color: Colors.red,
-                      ),
-                    ],
+                ],
+                if (imageUrl.isNotEmpty) ...[
+                  const SizedBox(height: 15),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(
+                      imageUrl,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Center(
+                            child: Text(
+                              'تعذر عرض الصورة',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                if (publishedDate != null) ...[
+                  const SizedBox(height: 16),
+                  const Divider(color: Color(0xFFFFC107), thickness: 2),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      textDirection: TextDirection.ltr,
+                      spacing: 180,
+                      runSpacing: 8,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          textDirection: TextDirection.ltr,
+                          children: [
+                            const Icon(
+                              Icons.calendar_today_outlined,
+                              size: 16,
+                              color: MosquePalette.amber,
+                            ),
+                            const SizedBox(width: 7),
+                            Text(
+                              '${twoDigits(publishedDate.day)}/'
+                              '${twoDigits(publishedDate.month)}/'
+                              '${publishedDate.year}',
+                              textDirection: TextDirection.ltr,
+                              style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          textDirection: TextDirection.ltr,
+                          children: [
+                            const Icon(
+                              Icons.access_time_outlined,
+                              size: 16,
+                              color: MosquePalette.amber,
+                            ),
+                            const SizedBox(width: 7),
+                            Text(
+                              '${twoDigits(publishedDate.hour)}:'
+                              '${twoDigits(publishedDate.minute)}',
+                              textDirection: TextDirection.ltr,
+                              style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ],
             ),
-            const SizedBox(height: 14),
-          ],
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF211C17),
-            ),
           ),
-          const SizedBox(height: 10),
-          Text(
-            description,
-            style: const TextStyle(
-              fontSize: 16.5,
-              fontWeight: FontWeight.w500,
-              height: 1.7,
-              color: Color(0xFF302B25),
-            ),
-          ),
-          if (imageUrl.isNotEmpty) ...[
-            const SizedBox(height: 15),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                imageUrl,
-                width: double.infinity,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: Text(
-                        'تعذر عرض الصورة',
-                        style: TextStyle(color: AnnouncementColors.muted),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-          if (formattedDate.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const Divider(color: AnnouncementColors.border),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.calendar_today_outlined,
-                  size: 16,
-                  color: AnnouncementColors.gold,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  formattedDate,
-                  style: const TextStyle(
-                    color: AnnouncementColors.muted,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
@@ -402,9 +404,9 @@ class _StatusMessage extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
-                color: AnnouncementColors.muted,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
