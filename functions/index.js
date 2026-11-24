@@ -1132,3 +1132,44 @@ exports.cleanupDeletedAnnouncementImage = onDocumentDeleted({
 Object.assign(exports, require("./courses").makeCourseFunctions({
   db, requireAdmin,
 }));
+
+// Public excursions/activity enrollment; admin requires verified access.
+Object.assign(exports, require("./activities").makeActivityFunctions({
+  db, requireAdmin,
+}));
+
+// Homework publishing and private drafts, without public-user accounts.
+Object.assign(exports, require("./homework").makeHomeworkFunctions({
+  db, requireAdmin,
+}));
+
+// Automatic VISIBILITY expiration, never destructive deletion: preserves
+// participation records and permits the admin to re-publish later.
+exports.autoHideActivities = onSchedule({
+  schedule: "every 15 minutes",
+  region: "me-west1",
+  maxInstances: 1,
+}, async () => {
+  const activities = db.collection("activities");
+  let hidden = 0;
+  for (let pass = 0; pass < 10; pass++) {
+    const due = await activities.where("hideAt", "<=", Timestamp.now())
+        .limit(200).get();
+    if (due.empty) break;
+    const batch = db.batch();
+    for (const doc of due.docs) {
+      batch.update(doc.ref, {hideAt: null, isVisible: false,
+        autoHiddenAt: FieldValue.serverTimestamp()});
+      hidden++;
+    }
+    await batch.commit();
+    if (due.size < 200) break;
+  }
+  if (hidden) logger.info("Activities hidden at deadline", {hidden});
+});
+
+
+// Server-side publication notifications. Only a newly PUBLIC item triggers a
+// broadcast. Edits and hidden drafts do not notify devices.
+Object.assign(exports, require("./public_notifications")
+    .makePublicNotificationFunctions({db}));

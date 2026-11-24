@@ -1,4 +1,4 @@
-import 'dart:async';
+
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -29,7 +29,6 @@ class AnnouncementsPage extends StatefulWidget {
 class _AnnouncementsPageState extends State<AnnouncementsPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _announcementsStream;
   String? _deletingId;
-  Timer? _expirationRefresh;
 
   @override
   void initState() {
@@ -38,16 +37,6 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
         .collection('announcements')
         .orderBy('publishedAt', descending: true)
         .snapshots();
-    // Recheck the time even when Firestore sends no new snapshot.
-    _expirationRefresh = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  @override
-  void dispose() {
-    _expirationRefresh?.cancel();
-    super.dispose();
   }
 
   void _showNotice(String text) {
@@ -63,14 +52,14 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
       builder: (dialogContext) => _AnnouncementEditorDialog(document: document),
     );
     if (!mounted || saved != true) return;
-    _showNotice(
-      document == null ? 'تم نشر الإعلان بنجاح' : 'تم تعديل الإعلان بنجاح',
-    );
+    _showNotice(document == null
+        ? 'تم نشر الإعلان بنجاح'
+        : 'تم تعديل الإعلان بنجاح');
   }
 
   Future<void> _deleteAnnouncement(
-    DocumentSnapshot<Map<String, dynamic>> document,
-  ) async {
+      DocumentSnapshot<Map<String, dynamic>> document,
+      ) async {
     if (_deletingId != null) return;
     final confirm = await showDialog<bool>(
       context: context,
@@ -104,17 +93,13 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
           if (error.code != 'object-not-found') imageCleanupFailed = true;
         }
       }
-      _showNotice(
-        imageCleanupFailed
-            ? 'تم حذف الإعلان، لكن تعذر حذف صورته من التخزين'
-            : 'تم حذف الإعلان بنجاح',
-      );
+      _showNotice(imageCleanupFailed
+          ? 'تم حذف الإعلان، لكن تعذر حذف صورته من التخزين'
+          : 'تم حذف الإعلان بنجاح');
     } on FirebaseException catch (error) {
-      _showNotice(
-        error.code == 'permission-denied'
-            ? 'ليس لديك صلاحية لحذف الإعلانات'
-            : 'تعذر حذف الإعلان، حاول مرة أخرى',
-      );
+      _showNotice(error.code == 'permission-denied'
+          ? 'ليس لديك صلاحية لحذف الإعلانات'
+          : 'تعذر حذف الإعلان، حاول مرة أخرى');
     } catch (_) {
       _showNotice('تعذر حذف الإعلان، حاول مرة أخرى');
     } finally {
@@ -127,41 +112,28 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _announcementsStream,
       builder: (context, snapshot) {
-        final documents = snapshot.data?.docs ?? [];
-        final activeDocuments = widget.isAdmin
-            ? documents
-            : documents.where((document) {
-                return !_announcementHasExpired(document.data());
-              }).toList();
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           children: [
-            Center(
+            const Center(
               child: Column(
                 children: [
-                  const Icon(
-                    Icons.campaign_outlined,
-                    size: 42,
-                    color: AnnouncementColors.gold,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'آخر الأخبار',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'تابع أخبار المسجد والمستجدات',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                  Icon(Icons.campaign_outlined,
+                      size: 42, color: AnnouncementColors.gold),
+                  SizedBox(height: 12),
+                  Text('إعلانات المسجد',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: AnnouncementColors.dark,
+                      )),
+                  SizedBox(height: 8),
+                  Text('تابع آخر الإعلانات والمستجدات',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: AnnouncementColors.muted,
+                      )),
                 ],
               ),
             ),
@@ -197,28 +169,26 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                   ),
                 ),
               )
-            else if (activeDocuments.isEmpty)
-              const _StatusMessage(
-                icon: Icons.inbox_outlined,
-                message: 'لا توجد إعلانات حاليًا',
-              )
-            else
-              ...activeDocuments.map(
-                (document) => Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: AnnouncementCard(
-                    data: document.data(),
-                    isAdmin: widget.isAdmin,
-                    isDeleting: _deletingId == document.id,
-                    onEdit: _deletingId == null
-                        ? () => _openEditor(document: document)
-                        : null,
-                    onDelete: _deletingId == null
-                        ? () => _deleteAnnouncement(document)
-                        : null,
-                  ),
-                ),
-              ),
+            else if (snapshot.data!.docs.isEmpty)
+                const _StatusMessage(
+                  icon: Icons.inbox_outlined,
+                  message: 'لا توجد إعلانات حاليًا',
+                )
+              else
+              ...snapshot.data!.docs.map((document) => Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: AnnouncementCard(
+                      data: document.data(),
+                      isAdmin: widget.isAdmin,
+                      isDeleting: _deletingId == document.id,
+                      onEdit: _deletingId == null
+                          ? () => _openEditor(document: document)
+                          : null,
+                      onDelete: _deletingId == null
+                          ? () => _deleteAnnouncement(document)
+                          : null,
+                    ),
+                  )),
           ],
         );
       },
@@ -245,17 +215,10 @@ class AnnouncementCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final title = (data['title'] ?? '').toString();
     final description = (data['description'] ?? '').toString();
     final isImportant = data['isImportant'] == true;
     final imageUrl = (data['imageUrl'] ?? '').toString().trim();
-    final expirationValue = data['expiresAt'];
-    final expirationDate = expirationValue is Timestamp
-        ? expirationValue.toDate().toLocal()
-        : null;
-    final isExpired = _announcementHasExpired(data);
     final publishedAt = data['publishedAt'];
     final DateTime? date = publishedAt is Timestamp
         ? publishedAt.toDate()
@@ -267,18 +230,16 @@ class AnnouncementCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF252B27) : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isImportant
               ? const Color(0xFFE3C991)
-              : isDark
-              ? const Color(0xFF404A42)
               : AnnouncementColors.border,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.0 : 0.035),
+            color: Colors.black.withValues(alpha: 0.035),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -329,9 +290,7 @@ class AnnouncementCard extends StatelessWidget {
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.delete_outline, size: 21),
                         color: Colors.red,
@@ -343,24 +302,20 @@ class AnnouncementCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 25,
-              fontWeight: FontWeight.w800,
-              color: scheme.onSurface,
-            ),
-          ),
+          Text(title,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF211C17),
+              )),
           const SizedBox(height: 10),
-          Text(
-            description,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              height: 1.7,
-              color: scheme.onSurface,
-            ),
-          ),
+          Text(description,
+              style: const TextStyle(
+                fontSize: 16.5,
+                fontWeight: FontWeight.w500,
+                height: 1.7,
+                color: Color(0xFF302B25),
+              )),
           if (imageUrl.isNotEmpty) ...[
             const SizedBox(height: 15),
             ClipRRect(
@@ -370,52 +325,31 @@ class AnnouncementCard extends StatelessWidget {
                 width: double.infinity,
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) {
-                  return Padding(
-                    padding: const EdgeInsets.all(16),
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
                     child: Center(
-                      child: Text(
-                        'تعذر عرض الصورة',
-                        style: TextStyle(color: scheme.onSurfaceVariant),
-                      ),
+                      child: Text('تعذر عرض الصورة',
+                          style: TextStyle(color: AnnouncementColors.muted)),
                     ),
                   );
                 },
               ),
             ),
           ],
-          if (isAdmin && expirationDate != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              isExpired
-                  ? 'انتهت مدة هذا الخبر'
-                  : 'ينتهي النشر: ${_formatExpiration(expirationDate)}',
-              style: TextStyle(
-                fontSize: 13,
-                color: isExpired
-                    ? Colors.red.shade400
-                    : scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
           if (formattedDate.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Divider(color: scheme.outlineVariant),
+            const Divider(color: AnnouncementColors.border),
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(
-                  Icons.calendar_today_outlined,
-                  size: 16,
-                  color: AnnouncementColors.gold,
-                ),
+                const Icon(Icons.calendar_today_outlined,
+                    size: 16, color: AnnouncementColors.gold),
                 const SizedBox(width: 8),
-                Text(
-                  formattedDate,
-                  style: TextStyle(
-                    color: scheme.onSurfaceVariant,
-                    fontSize: 13,
-                  ),
-                ),
+                Text(formattedDate,
+                    style: const TextStyle(
+                      color: AnnouncementColors.muted,
+                      fontSize: 13,
+                    )),
               ],
             ),
           ],
@@ -440,14 +374,12 @@ class _StatusMessage extends StatelessWidget {
           children: [
             Icon(icon, size: 55, color: AnnouncementColors.gold),
             const SizedBox(height: 16),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  color: AnnouncementColors.muted,
+                )),
           ],
         ),
       ),
@@ -472,8 +404,6 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   bool _isImportant = false;
-  bool _useExpiration = false;
-  DateTime? _expiresAt;
   bool _isSaving = false;
   Uint8List? _newImage;
   String? _imageContentType;
@@ -490,11 +420,6 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     _titleController.text = (data['title'] ?? '').toString();
     _descriptionController.text = (data['description'] ?? '').toString();
     _isImportant = data['isImportant'] == true;
-    final expiresAt = data['expiresAt'];
-    if (expiresAt is Timestamp) {
-      _useExpiration = true;
-      _expiresAt = expiresAt.toDate().toLocal();
-    }
     _existingImageUrl = (data['imageUrl'] ?? '').toString();
     _existingImagePath = (data['imagePath'] ?? '').toString();
   }
@@ -538,21 +463,13 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
   }
 
   (String, String)? _detectImageFormat(Uint8List bytes) {
-    if (bytes.length >= 3 &&
-        bytes[0] == 0xff &&
-        bytes[1] == 0xd8 &&
+    if (bytes.length >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 &&
         bytes[2] == 0xff) {
       return ('image/jpeg', 'jpg');
     }
-    if (bytes.length >= 8 &&
-        bytes[0] == 0x89 &&
-        bytes[1] == 0x50 &&
-        bytes[2] == 0x4e &&
-        bytes[3] == 0x47 &&
-        bytes[4] == 0x0d &&
-        bytes[5] == 0x0a &&
-        bytes[6] == 0x1a &&
-        bytes[7] == 0x0a) {
+    if (bytes.length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 &&
+        bytes[2] == 0x4e && bytes[3] == 0x47 && bytes[4] == 0x0d &&
+        bytes[5] == 0x0a && bytes[6] == 0x1a && bytes[7] == 0x0a) {
       return ('image/png', 'png');
     }
     if (bytes.length >= 12 &&
@@ -568,58 +485,15 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> _pickExpiration() async {
-    if (_isSaving) return;
-    final now = DateTime.now();
-    final suggested = _expiresAt ?? now.add(const Duration(days: 7));
-    final today = DateTime(now.year, now.month, now.day);
-    final initial = suggested.isBefore(today) ? today : suggested;
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: today,
-      lastDate: DateTime(now.year + 5, 12, 31),
-    );
-    if (selectedDate == null || !mounted) return;
-    final selectedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(
-        _expiresAt ?? now.add(const Duration(hours: 1)),
-      ),
-    );
-    if (selectedTime == null || !mounted) return;
-    final expiration = DateTime(
-      selectedDate.year,
-      selectedDate.month,
-      selectedDate.day,
-      selectedTime.hour,
-      selectedTime.minute,
-    );
-    if (!expiration.isAfter(DateTime.now())) {
-      _showError('يرجى تحديد موعد مستقبلي لانتهاء النشر');
-      return;
-    }
-    setState(() => _expiresAt = expiration);
-  }
-
   Future<void> _save() async {
     if (_isSaving || !_formKey.currentState!.validate()) return;
-    if (_useExpiration &&
-        (_expiresAt == null || !_expiresAt!.isAfter(DateTime.now()))) {
-      _showError('يرجى تحديد تاريخ ووقت مستقبلي لانتهاء النشر');
-      return;
-    }
-    final expirationField = _useExpiration
-        ? Timestamp.fromDate(_expiresAt!)
-        : null;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _showError('يرجى تسجيل الدخول أولًا');
       return;
     }
     setState(() => _isSaving = true);
-    final reference =
-        widget.document?.reference ??
+    final reference = widget.document?.reference ??
         FirebaseFirestore.instance.collection('announcements').doc();
     final oldImagePath = _existingImagePath;
     var nextImagePath = _removeCurrentImage ? '' : _existingImagePath;
@@ -627,8 +501,7 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     String? uploadedPath;
     try {
       if (_newImage != null) {
-        final path =
-            'announcements/${reference.id}/images/'
+        final path = 'announcements/${reference.id}/images/'
             'cover_${DateTime.now().microsecondsSinceEpoch}.$_extension';
         final imageRef = FirebaseStorage.instance.ref(path);
         uploadedPath = path;
@@ -645,7 +518,6 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           'title': _titleController.text.trim(),
           'description': _descriptionController.text.trim(),
           'isImportant': _isImportant,
-          'expiresAt': expirationField,
           'imageUrl': nextImageUrl,
           'imagePath': nextImagePath,
           'publishedAt': FieldValue.serverTimestamp(),
@@ -656,7 +528,6 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           'title': _titleController.text.trim(),
           'description': _descriptionController.text.trim(),
           'isImportant': _isImportant,
-          'expiresAt': expirationField,
           'imageUrl': nextImageUrl,
           'imagePath': nextImagePath,
           'updatedAt': FieldValue.serverTimestamp(),
@@ -681,13 +552,12 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           // A cleanup failure does not hide the original error.
         }
       }
-      _showError(
-        error.code == 'permission-denied' || error.code == 'unauthorized'
-            ? 'ليس لديك صلاحية لحفظ الإعلان أو صورته'
-            : error.code == 'bucket-not-found'
-            ? 'يرجى إعداد Firebase Storage أولًا'
-            : 'تعذر حفظ الإعلان، حاول مرة أخرى',
-      );
+      _showError(error.code == 'permission-denied' ||
+          error.code == 'unauthorized'
+          ? 'ليس لديك صلاحية لحفظ الإعلان أو صورته'
+          : error.code == 'bucket-not-found'
+          ? 'يرجى إعداد Firebase Storage أولًا'
+          : 'تعذر حفظ الإعلان، حاول مرة أخرى');
     } catch (_) {
       if (uploadedPath != null) {
         try {
@@ -704,14 +574,10 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final showOldImage =
-        _newImage == null &&
-        !_removeCurrentImage &&
+    final showOldImage = _newImage == null && !_removeCurrentImage &&
         _existingImageUrl.isNotEmpty;
     return AlertDialog(
-      title: Text(
-        widget.document == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان',
-      ),
+      title: Text(widget.document == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان'),
       content: SingleChildScrollView(
         child: SizedBox(
           width: 420,
@@ -726,8 +592,7 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
                   maxLength: 120,
                   textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(
-                    labelText: 'عنوان الإعلان',
-                    border: OutlineInputBorder(),
+                    labelText: 'عنوان الإعلان', border: OutlineInputBorder(),
                   ),
                   validator: (value) {
                     final title = (value ?? '').trim();
@@ -757,78 +622,35 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
                   contentPadding: EdgeInsets.zero,
                   onChanged: _isSaving
                       ? null
-                      : (value) =>
-                            setState(() => _isImportant = value ?? false),
+                      : (value) => setState(() => _isImportant = value ?? false),
                 ),
-                const SizedBox(height: 10),
-                CheckboxListTile(
-                  title: const Text('تحديد موعد لانتهاء النشر (اختياري)'),
-                  subtitle: const Text(
-                    'عند إلغاء التحديد يبقى الخبر منشورًا دون موعد انتهاء.',
-                  ),
-                  value: _useExpiration,
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: AnnouncementColors.gold,
-                  onChanged: _isSaving
-                      ? null
-                      : (value) => setState(() {
-                          _useExpiration = value ?? false;
-                          if (!_useExpiration) _expiresAt = null;
-                        }),
-                ),
-                if (_useExpiration) ...[
-                  const SizedBox(height: 4),
-                  OutlinedButton.icon(
-                    onPressed: _isSaving ? null : _pickExpiration,
-                    icon: const Icon(Icons.event_outlined),
-                    label: Text(
-                      _expiresAt == null
-                          ? 'اختيار التاريخ والساعة'
-                          : 'ينتهي: ${_formatExpiration(_expiresAt!)}',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
                 const SizedBox(height: 6),
                 OutlinedButton.icon(
                   onPressed: _isSaving ? null : _pickImage,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(
-                    _newImage != null || showOldImage
-                        ? 'تغيير الصورة'
-                        : 'إضافة صورة (اختياري)',
-                  ),
+                  label: Text(_newImage != null || showOldImage
+                      ? 'تغيير الصورة' : 'إضافة صورة (اختياري)'),
                 ),
                 if (_newImage != null || showOldImage) ...[
                   const SizedBox(height: 10),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: _newImage != null
-                        ? Image.memory(
-                            _newImage!,
-                            height: 150,
-                            width: double.infinity,
-                            fit: BoxFit.contain,
-                          )
-                        : Image.network(
-                            _existingImageUrl,
-                            height: 150,
-                            width: double.infinity,
-                            fit: BoxFit.contain,
-                          ),
+                        ? Image.memory(_newImage!, height: 150,
+                        width: double.infinity, fit: BoxFit.contain)
+                        : Image.network(_existingImageUrl, height: 150,
+                        width: double.infinity, fit: BoxFit.contain),
                   ),
                   TextButton.icon(
                     onPressed: _isSaving
                         ? null
                         : () => setState(() {
-                            _newImage = null;
-                            _removeCurrentImage = true;
-                          }),
+                      _newImage = null;
+                      _removeCurrentImage = true;
+                    }),
                     icon: const Icon(Icons.close, color: Colors.red),
-                    label: const Text(
-                      'إزالة الصورة',
-                      style: TextStyle(color: Colors.red),
-                    ),
+                    label: const Text('إزالة الصورة',
+                        style: TextStyle(color: Colors.red)),
                   ),
                 ],
               ],
@@ -849,10 +671,9 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           ),
           child: _isSaving
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+            width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
               : Text(widget.document == null ? 'نشر الإعلان' : 'حفظ التعديلات'),
         ),
       ],
@@ -862,19 +683,4 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
 
 bool _isOwnedImagePath(String announcementId, String path) {
   return path.startsWith('announcements/$announcementId/images/');
-}
-
-// Date checks are local to the display; the scheduled server cleanup is
-// responsible for permanent deletion of Firestore documents and images.
-bool _announcementHasExpired(Map<String, dynamic> data) {
-  final value = data['expiresAt'];
-  return value is Timestamp && !value.toDate().isAfter(DateTime.now());
-}
-
-String _formatExpiration(DateTime value) {
-  final day = value.day.toString().padLeft(2, '0');
-  final month = value.month.toString().padLeft(2, '0');
-  final hours = value.hour.toString().padLeft(2, '0');
-  final minutes = value.minute.toString().padLeft(2, '0');
-  return '$day/$month/${value.year} $hours:$minutes';
 }

@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'courses_service.dart';
+import 'activities_service.dart';
 
 // No Firebase Auth account is created for public users. Each installation has
 // a random private key only to update FCM delivery and check its own statuses.
@@ -49,12 +50,16 @@ class CourseNotificationsService {
   }
 
   Future<void> initialize() async {
+    // ignore: deprecated_member_use
     _refreshSubscription ??= FirebaseMessaging.instance.onTokenRefresh.listen(
       (token) => unawaited(_syncIfRegistered(token)),
       onError: (Object error) {},
     );
     _messageSubscription ??= FirebaseMessaging.onMessage.listen((message) {
-      if (message.data['type'] != 'course_decision') return;
+      if (message.data['type'] != 'course_decision' &&
+          message.data['type'] != 'activity_decision') {
+        return;
+      }
       final text = message.notification?.title ?? 'تحديث بخصوص تسجيلك';
       courseMessengerKey.currentState?.showSnackBar(
         SnackBar(content: Text(text)),
@@ -64,8 +69,9 @@ class CourseNotificationsService {
       final key = await existingDeviceKey();
       if (key != null) {
         final token = await _safeCurrentToken();
-        if (token != null)
-          await CoursesService.syncToken(deviceKey: key, token: token);
+        if (token != null) {
+          await _syncBoth(key, token);
+        }
       }
     } catch (_) {
       // No need to interrupt the public app when notifications are unavailable.
@@ -76,10 +82,23 @@ class CourseNotificationsService {
     try {
       final key = await existingDeviceKey();
       if (key != null) {
-        await CoursesService.syncToken(deviceKey: key, token: token);
+        await _syncBoth(key, token);
       }
     } catch (_) {
       // A subsequent app launch will retry the sync.
+    }
+  }
+
+  Future<void> _syncBoth(String key, String token) async {
+    try {
+      await CoursesService.syncToken(deviceKey: key, token: token);
+    } catch (_) {
+      // Course token update failure must not block activity notification sync.
+    }
+    try {
+      await ActivitiesService.syncToken(key, token);
+    } catch (_) {
+      // Both are retried at the next launch or token rotation.
     }
   }
 
@@ -89,6 +108,7 @@ class CourseNotificationsService {
         final apns = await FirebaseMessaging.instance.getAPNSToken();
         if (apns == null) return null;
       }
+      // ignore: deprecated_member_use
       return await FirebaseMessaging.instance.getToken();
     } catch (_) {
       return null;

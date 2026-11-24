@@ -8,6 +8,7 @@ import '../services/course_notifications_service.dart';
 import '../services/courses_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/course_status_badge.dart';
+import '../widgets/masjid_section_style.dart';
 import 'course_editor_dialog.dart';
 import 'course_registration_dialog.dart';
 import 'course_registrations_page.dart';
@@ -109,7 +110,6 @@ class _CoursesPageState extends State<CoursesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _stream,
       builder: (context, snapshot) {
@@ -122,31 +122,13 @@ class _CoursesPageState extends State<CoursesPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
               children: [
-                const Icon(
-                  Icons.school_outlined,
-                  size: 42,
-                  color: AppColors.gold,
+                const MosqueSectionHeader(
+                  emoji: '🎓',
+                  title: 'الدورات',
+                  subtitle: 'تعلّم، شارك، وواصل رحلتك مع المعرفة',
+                  accent: MosquePalette.ocean,
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'الدورات',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: scheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  'اكتشف الدورات وسجّل للمشاركة',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 if (widget.isAdmin)
                   ElevatedButton.icon(
                     onPressed: () => _openEditor(),
@@ -249,6 +231,7 @@ class _CourseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final hasEnded =
         course.startAt != null && !course.startAt!.isAfter(DateTime.now());
     final isClosed = !course.isOpen || hasEnded;
@@ -284,131 +267,168 @@ class _CourseCard extends StatelessWidget {
         ),
     ];
 
-    // Match the white announcement cards in light mode and their dark
-    // surface variant in night mode, without changing the global theme.
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF252B27) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? const Color(0xFF404A42) : AppColors.border,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.0 : 0.035),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              course.title,
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 19,
-                height: 1.3,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (isAdmin && !course.isVisible) ...[
-              const SizedBox(height: 10),
-              CourseStatusBadge(
-                label: 'مخفية عن المستخدمين',
-                color: scheme.onSurfaceVariant,
-                icon: Icons.visibility_off_outlined,
-              ),
-            ],
-            const SizedBox(height: 11),
-            CourseStatusBadge(
-              label: statusText,
-              color: statusColor,
-              icon: isFull
-                  ? Icons.people_alt_outlined
-                  : isClosed
-                  ? Icons.lock_outline
-                  : Icons.check_circle_outline,
-            ),
-            if (course.description.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                course.description,
-                style: TextStyle(color: scheme.onSurfaceVariant, height: 1.55),
-              ),
-            ],
-            if (details.isNotEmpty) ...[const SizedBox(height: 15), ...details],
-            if (isAdmin) ...[
-              const SizedBox(height: 10),
-              Text(
-                'بانتظار الموافقة: ${course.pendingCount}  ·  '
-                'المقبولون: ${course.acceptedCount}  ·  '
-                'المرفوضون: ${course.rejectedCount}',
-                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
-              ),
-              const SizedBox(height: 15),
-              Wrap(
-                spacing: 10,
-                runSpacing: 9,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('تعديل'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onRegistrations,
-                    icon: const Icon(Icons.people_outline),
-                    label: const Text('إدارة المسجلين'),
-                  ),
-                ],
-              ),
-            ] else ...[
-              const SizedBox(height: 17),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: canRegister ? onRegister : null,
-                  icon: const Icon(Icons.how_to_reg_outlined),
-                  label: const Text('التسجيل في الدورة'),
+    return MosqueCardShell(
+      accent: MosquePalette.ocean,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(height: 5, color: MosquePalette.ocean),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            course.title,
+                            style: TextStyle(
+                              color: scheme.onSurface,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w800,
+                              height: 1.45,
+                            ),
+                          ),
+                          const SizedBox(height: 9),
+                          Wrap(
+                            spacing: 7,
+                            runSpacing: 7,
+                            children: [
+                              CourseStatusBadge(
+                                label: statusText,
+                                color: statusColor,
+                                icon: isFull
+                                    ? Icons.people_alt_outlined
+                                    : isClosed
+                                    ? Icons.lock_outline
+                                    : Icons.check_circle_outline,
+                              ),
+                              if (isAdmin && !course.isVisible)
+                                CourseStatusBadge(
+                                  label: 'مخفية عن المستخدمين',
+                                  color: scheme.onSurfaceVariant,
+                                  icon: Icons.visibility_off_outlined,
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              if (course.registrationMode == 'approval' && canRegister)
-                Padding(
-                  padding: const EdgeInsets.only(top: 9),
-                  child: Text(
-                    'التسجيل يحتاج إلى موافقة المسؤول',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: 12,
+                if (course.description.trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: MosquePalette.ocean.withValues(
+                        alpha: dark ? .13 : .065,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      course.description,
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 15,
+                        height: 1.65,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ],
-        ),
+                ],
+                if (details.isNotEmpty) ...[
+                  const SizedBox(height: 15),
+                  ...details,
+                ],
+                if (isAdmin) ...[
+                  const SizedBox(height: 12),
+                  Divider(color: scheme.outlineVariant),
+                  const SizedBox(height: 9),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      MosqueTag(
+                        text: '⏳ بانتظار: ${course.pendingCount}',
+                        color: MosquePalette.amber,
+                      ),
+                      MosqueTag(
+                        text: '✓ المقبولون: ${course.acceptedCount}',
+                        color: MosquePalette.emerald,
+                      ),
+                      MosqueTag(
+                        text: 'المرفوضون: ${course.rejectedCount}',
+                        color: scheme.error,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 9,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('تعديل'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onRegistrations,
+                        icon: const Icon(Icons.people_outline),
+                        label: const Text('إدارة المسجلين'),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: canRegister ? onRegister : null,
+                      icon: const Icon(Icons.how_to_reg_outlined),
+                      label: const Text('التسجيل في الدورة'),
+                    ),
+                  ),
+                  if (course.registrationMode == 'approval' && canRegister)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 9),
+                      child: Text(
+                        'التسجيل يحتاج إلى موافقة المسؤول',
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _detail(IconData icon, String label, ColorScheme scheme) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 9),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 17, color: AppColors.gold),
+          Icon(icon, size: 17, color: MosquePalette.ocean),
           const SizedBox(width: 9),
           Expanded(
             child: Text(
               label,
               style: TextStyle(
-                fontSize: 13,
-                height: 1.4,
+                fontSize: 13.5,
+                height: 1.5,
                 color: scheme.onSurfaceVariant,
               ),
             ),

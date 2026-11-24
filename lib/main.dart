@@ -9,7 +9,10 @@ import 'firebase_options.dart';
 import 'screens/account_settings_page.dart';
 import 'screens/announcements_page.dart';
 import 'screens/courses_page.dart';
+import 'screens/activities_page.dart';
+import 'screens/homework_page.dart';
 import 'services/course_notifications_service.dart';
+import 'services/public_notifications_service.dart';
 import 'widgets/app_theme.dart';
 import 'widgets/editable_spiritual_card.dart';
 
@@ -54,6 +57,7 @@ Future<void> main() async {
   await themeController.load();
   runApp(const MasjidApp());
   unawaited(CourseNotificationsService.instance.initialize());
+  unawaited(PublicNotificationsService.instance.initialize());
 }
 
 // Replace with verified mosque contact information.
@@ -102,16 +106,26 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int selectedIndex = 0;
+  int selectedIndex = PublicNotificationsService.requestedTab.value ?? 0;
 
-  static const List<String> titles = [
-    'الرئيسية',
-    'آخر الأخبار',
-    'الدورات',
-    'الأنشطة',
-    'الوظائف البيتية',
-    'الإعدادات',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    PublicNotificationsService.requestedTab.addListener(_onNotificationOpen);
+  }
+
+  void _onNotificationOpen() {
+    final section = PublicNotificationsService.requestedTab.value;
+    if (mounted && section != null && section != selectedIndex) {
+      setState(() => selectedIndex = section);
+    }
+  }
+
+  @override
+  void dispose() {
+    PublicNotificationsService.requestedTab.removeListener(_onNotificationOpen);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -123,17 +137,9 @@ class _MainScreenState extends State<MainScreen> {
 
       CoursesPage(isAdmin: widget.isAdmin),
 
-      const SectionPage(
-        title: 'الأنشطة',
-        icon: Icons.calendar_month_outlined,
-        description: 'الفعاليات والمحاضرات القادمة',
-      ),
+      ActivitiesPage(isAdmin: widget.isAdmin),
 
-      const SectionPage(
-        title: 'الوظائف البيتية',
-        icon: Icons.menu_book_outlined,
-        description: 'الوظائف البيتية للدورات',
-      ),
+      HomeworkPage(isAdmin: widget.isAdmin),
 
       AccountSettingsPage(
         isAdmin: widget.isAdmin,
@@ -143,19 +149,10 @@ class _MainScreenState extends State<MainScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: selectedIndex == 0
-            ? null
-            : Text(
-                titles[selectedIndex],
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+      body: SafeArea(
+        bottom: false,
+        child: IndexedStack(index: selectedIndex, children: pages),
       ),
-
-      body: IndexedStack(index: selectedIndex, children: pages),
 
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: selectedIndex,
@@ -185,7 +182,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.calendar_month_outlined),
-            label: 'الأنشطة',
+            label: 'الأنشطة والرحلات',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.menu_book_outlined),

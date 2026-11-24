@@ -1,0 +1,680 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:material_ui/material_ui.dart';
+
+import '../widgets/masjid_section_style.dart';
+
+// Colors used by the existing mosque application.
+class AnnouncementColors {
+  static const gold = Color(0xFFA16602);
+  static const dark = Color(0xFF342F27);
+  static const muted = Color(0xFF756C5D);
+  static const border = Color(0xFFE9DFC9);
+  static const paleGold = Color(0xFFF9EED7);
+}
+
+// Keeps the original API used by main.dart.
+class AnnouncementsPage extends StatefulWidget {
+  final bool isAdmin;
+
+  const AnnouncementsPage({super.key, this.isAdmin = false});
+
+  @override
+  State<AnnouncementsPage> createState() => _AnnouncementsPageState();
+}
+
+class _AnnouncementsPageState extends State<AnnouncementsPage> {
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _announcementsStream;
+  String? _deletingId;
+  Timer? _expirationRefresh;
+
+  @override
+  void initState() {
+    super.initState();
+    _announcementsStream = FirebaseFirestore.instance
+        .collection('announcements')
+        .orderBy('publishedAt', descending: true)
+        .snapshots();
+    // Recheck the time even when Firestore sends no new snapshot.
+    _expirationRefresh = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _expirationRefresh?.cancel();
+    super.dispose();
+  }
+
+  void _showNotice(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _openEditor({
+    DocumentSnapshot<Map<String, dynamic>>? document,
+  }) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => _AnnouncementEditorDialog(document: document),
+    );
+    if (!mounted || saved != true) return;
+    _showNotice(
+      document == null ? 'تم نشر الإعلان بنجاح' : 'تم تعديل الإعلان بنجاح',
+    );
+  }
+
+  Future<void> _deleteAnnouncement(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) async {
+    if (_deletingId != null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف الإعلان'),
+        content: const Text('هل أنت متأكد من حذف هذا الإعلان نهائيًا؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _deletingId = document.id);
+    try {
+      final data = document.data() ?? <String, dynamic>{};
+      final oldPath = (data['imagePath'] ?? '').toString();
+      await document.reference.delete();
+      var imageCleanupFailed = false;
+      if (_isOwnedImagePath(document.id, oldPath)) {
+        try {
+          await FirebaseStorage.instance.ref(oldPath).delete();
+        } on FirebaseException catch (error) {
+          // Missing images need no cleanup; all other failures are reported.
+          if (error.code != 'object-not-found') imageCleanupFailed = true;
+        }
+      }
+      _showNotice(
+        imageCleanupFailed
+            ? 'تم حذف الإعلان، لكن تعذر حذف صورته من التخزين'
+            : 'تم حذف الإعلان بنجاح',
+      );
+    } on FirebaseException catch (error) {
+      _showNotice(
+        error.code == 'permission-denied'
+            ? 'ليس لديك صلاحية لحذف الإعلانات'
+            : 'تعذر حذف الإعلان، حاول مرة أخرى',
+      );
+    } catch (_) {
+      _showNotice('تعذر حذف الإعلان، حاول مرة أخرى');
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _announcementsStream,
+      builder: (context, snapshot) {
+        final documents = snapshot.data?.docs ?? [];
+        final activeDocuments = widget.isAdmin
+            ? documents
+            : documents.where((document) {
+                return !_announcementHasExpired(document.data());
+              }).toList();
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          children: [
+            const MosqueSectionHeader(
+              emoji: '📢',
+              title: 'آخر الأخبار',
+              subtitle: 'أخبار مسجدنا وإعلاناته في مكان واحد',
+              accent: MosquePalette.amber,
+            ),
+            const SizedBox(height: 24),
+            if (widget.isAdmin) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _deletingId == null ? () => _openEditor() : null,
+                  icon: const Icon(Icons.add_circle_outline),
+                  label: const Text('إضافة إعلان جديد'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AnnouncementColors.gold,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ] else
+              const SizedBox(height: 6),
+            if (snapshot.hasError)
+              const _StatusMessage(
+                icon: Icons.error_outline,
+                message: 'تعذر تحميل الإعلانات، حاول لاحقًا',
+              )
+            else if (!snapshot.hasData)
+              const Padding(
+                padding: EdgeInsets.only(top: 60),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: AnnouncementColors.gold,
+                  ),
+                ),
+              )
+            else if (activeDocuments.isEmpty)
+              const _StatusMessage(
+                icon: Icons.inbox_outlined,
+                message: 'لا توجد إعلانات حاليًا',
+              )
+            else
+              ...activeDocuments.map(
+                (document) => Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: AnnouncementCard(
+                    data: document.data(),
+                    isAdmin: widget.isAdmin,
+                    isDeleting: _deletingId == document.id,
+                    onEdit: _deletingId == null
+                        ? () => _openEditor(document: document)
+                        : null,
+                    onDelete: _deletingId == null
+                        ? () => _deleteAnnouncement(document)
+                        : null,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// Reusable card for an announcement.
+// Announcement data actions remain unchanged; only visual presentation differs.
+class AnnouncementCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final bool isAdmin;
+  final bool isDeleting;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  const AnnouncementCard({
+    super.key,
+    required this.data,
+    this.isAdmin = false,
+    this.isDeleting = false,
+    this.onEdit,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final title = (data['title'] ?? '').toString();
+    final description = (data['description'] ?? '').toString();
+    final isImportant = data['isImportant'] == true;
+    final imageUrl = (data['imageUrl'] ?? '').toString().trim();
+    final expires = data['expiresAt'];
+    final expirationDate = expires is Timestamp
+        ? expires.toDate().toLocal()
+        : null;
+    final isExpired = _announcementHasExpired(data);
+    final published = data['publishedAt'];
+    final DateTime? publishedDate = published is Timestamp
+        ? published.toDate().toLocal()
+        : null;
+
+    return MosqueCardShell(
+      accent: MosquePalette.amber,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(height: 5, color: MosquePalette.amber),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 17, 18, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: [
+
+                          if (isImportant)
+                            const MosqueTag(
+                              text: 'إعلان مهم',
+                              color: MosquePalette.amber,
+                              icon: Icons.star_rounded,
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (isAdmin) ...[
+                      IconButton(
+                        tooltip: 'تعديل الإعلان',
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 21),
+                        color: MosquePalette.amber,
+                      ),
+                      IconButton(
+                        tooltip: 'حذف الإعلان',
+                        onPressed: onDelete,
+                        icon: isDeleting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.delete_outline, size: 21),
+                        color: scheme.error,
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 15),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 21,
+                    height: 1.4,
+                  ),
+                ),
+                if (description.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: MosquePalette.amber.withValues(
+                        alpha: dark ? .10 : .065,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      description,
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 15.5,
+                        height: 1.75,
+                      ),
+                    ),
+                  ),
+                ],
+                if (imageUrl.isNotEmpty) ...[
+                  const SizedBox(height: 15),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.network(
+                      imageUrl,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.broken_image_outlined,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'تعذر عرض الصورة',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (isAdmin && expirationDate != null) ...[
+                  const SizedBox(height: 12),
+                  MosqueTag(
+                    text: isExpired
+                        ? 'انتهت مدة هذا الخبر'
+                        : 'ينتهي النشر: ${_formatExpiration(expirationDate)}',
+                    color: isExpired ? scheme.error : MosquePalette.ocean,
+                    icon: Icons.schedule_outlined,
+                  ),
+                ],
+
+                if (publishedDate != null) ...[
+                  const SizedBox(height: 16),
+                  const Divider(
+  }
+
+  Future<void> _pickExpiration() async {
+    if (_isSaving) return;
+    final now = DateTime.now();
+    final suggested = _expiresAt ?? now.add(const Duration(days: 7));
+    final today = DateTime(now.year, now.month, now.day);
+    final initial = suggested.isBefore(today) ? today : suggested;
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: today,
+      lastDate: DateTime(now.year + 5, 12, 31),
+    );
+    if (selectedDate == null || !mounted) return;
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(
+        _expiresAt ?? now.add(const Duration(hours: 1)),
+      ),
+    );
+    if (selectedTime == null || !mounted) return;
+    final expiration = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+      selectedTime.hour,
+      selectedTime.minute,
+    );
+    if (!expiration.isAfter(DateTime.now())) {
+      _showError('يرجى تحديد موعد مستقبلي لانتهاء النشر');
+      return;
+    }
+    setState(() => _expiresAt = expiration);
+  }
+
+  Future<void> _save() async {
+    if (_isSaving || !_formKey.currentState!.validate()) return;
+    if (_useExpiration &&
+        (_expiresAt == null || !_expiresAt!.isAfter(DateTime.now()))) {
+      _showError('يرجى تحديد تاريخ ووقت مستقبلي لانتهاء النشر');
+      return;
+    }
+    final expirationField = _useExpiration
+        ? Timestamp.fromDate(_expiresAt!)
+        : null;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showError('يرجى تسجيل الدخول أولًا');
+      return;
+    }
+    setState(() => _isSaving = true);
+    final reference =
+        widget.document?.reference ??
+        FirebaseFirestore.instance.collection('announcements').doc();
+    final oldImagePath = _existingImagePath;
+    var nextImagePath = _removeCurrentImage ? '' : _existingImagePath;
+    var nextImageUrl = _removeCurrentImage ? '' : _existingImageUrl;
+    String? uploadedPath;
+    try {
+      if (_newImage != null) {
+        final path =
+            'announcements/${reference.id}/images/'
+            'cover_${DateTime.now().microsecondsSinceEpoch}.$_extension';
+        final imageRef = FirebaseStorage.instance.ref(path);
+        uploadedPath = path;
+        await imageRef.putData(
+          _newImage!,
+          SettableMetadata(contentType: _imageContentType),
+        );
+        nextImageUrl = await imageRef.getDownloadURL();
+        nextImagePath = path;
+      }
+
+      if (widget.document == null) {
+        await reference.set({
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'isImportant': _isImportant,
+          'expiresAt': expirationField,
+          'imageUrl': nextImageUrl,
+          'imagePath': nextImagePath,
+          'publishedAt': FieldValue.serverTimestamp(),
+          'createdBy': user.uid,
+        });
+      } else {
+        await reference.update({
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'isImportant': _isImportant,
+          'expiresAt': expirationField,
+          'imageUrl': nextImageUrl,
+          'imagePath': nextImagePath,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      // Cleanup old image only after the Firestore document was saved.
+      if (_isOwnedImagePath(reference.id, oldImagePath) &&
+          oldImagePath != nextImagePath) {
+        try {
+          await FirebaseStorage.instance.ref(oldImagePath).delete();
+        } on FirebaseException {
+          // Editing remains successful even when cleanup is unavailable.
+        }
+      }
+      if (mounted) Navigator.of(context).pop(true);
+    } on FirebaseException catch (error) {
+      // If Firestore failed after upload, remove the unreferenced new image.
+      if (uploadedPath != null) {
+        try {
+          await FirebaseStorage.instance.ref(uploadedPath).delete();
+        } on FirebaseException {
+          // A cleanup failure does not hide the original error.
+        }
+      }
+      _showError(
+        error.code == 'permission-denied' || error.code == 'unauthorized'
+            ? 'ليس لديك صلاحية لحفظ الإعلان أو صورته'
+            : error.code == 'bucket-not-found'
+            ? 'يرجى إعداد Firebase Storage أولًا'
+            : 'تعذر حفظ الإعلان، حاول مرة أخرى',
+      );
+    } catch (_) {
+      if (uploadedPath != null) {
+        try {
+          await FirebaseStorage.instance.ref(uploadedPath).delete();
+        } on FirebaseException {
+          // Ignore cleanup failure.
+        }
+      }
+      _showError('تعذر حفظ الإعلان، حاول مرة أخرى');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showOldImage =
+        _newImage == null &&
+        !_removeCurrentImage &&
+        _existingImageUrl.isNotEmpty;
+    return AlertDialog(
+      title: Text(
+        widget.document == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان',
+      ),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 420,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _titleController,
+                  maxLength: 120,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'عنوان الإعلان',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    final title = (value ?? '').trim();
+                    if (title.isEmpty) return 'يرجى إدخال عنوان الإعلان';
+                    if (title.length < 2) return 'العنوان قصير جدًا';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  maxLength: 2000,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'تفاصيل الإعلان',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) => (value ?? '').trim().isEmpty
+                      ? 'يرجى إدخال تفاصيل الإعلان'
+                      : null,
+                ),
+                CheckboxListTile(
+                  title: const Text('إعلان مهم'),
+                  value: _isImportant,
+                  activeColor: AnnouncementColors.gold,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: _isSaving
+                      ? null
+                      : (value) =>
+                            setState(() => _isImportant = value ?? false),
+                ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  title: const Text('تحديد موعد لانتهاء النشر (اختياري)'),
+                  subtitle: const Text(
+                    'عند إلغاء التحديد يبقى الخبر منشورًا دون موعد انتهاء.',
+                  ),
+                  value: _useExpiration,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AnnouncementColors.gold,
+                  onChanged: _isSaving
+                      ? null
+                      : (value) => setState(() {
+                          _useExpiration = value ?? false;
+                          if (!_useExpiration) _expiresAt = null;
+                        }),
+                ),
+                if (_useExpiration) ...[
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    onPressed: _isSaving ? null : _pickExpiration,
+                    icon: const Icon(Icons.event_outlined),
+                    label: Text(
+                      _expiresAt == null
+                          ? 'اختيار التاريخ والساعة'
+                          : 'ينتهي: ${_formatExpiration(_expiresAt!)}',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                  onPressed: _isSaving ? null : _pickImage,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: Text(
+                    _newImage != null || showOldImage
+                        ? 'تغيير الصورة'
+                        : 'إضافة صورة (اختياري)',
+                  ),
+                ),
+                if (_newImage != null || showOldImage) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _newImage != null
+                        ? Image.memory(
+                            _newImage!,
+                            height: 150,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          )
+                        : Image.network(
+                            _existingImageUrl,
+                            height: 150,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _isSaving
+                        ? null
+                        : () => setState(() {
+                            _newImage = null;
+                            _removeCurrentImage = true;
+                          }),
+                    icon: const Icon(Icons.close, color: Colors.red),
+                    label: const Text(
+                      'إزالة الصورة',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _save,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AnnouncementColors.gold,
+            foregroundColor: Colors.white,
+          ),
+          child: _isSaving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(widget.document == null ? 'نشر الإعلان' : 'حفظ التعديلات'),
+        ),
+      ],
+    );
+  }
+}
+
+bool _isOwnedImagePath(String announcementId, String path) {
+  return path.startsWith('announcements/$announcementId/images/');
+}
+
+// Date checks are local to the display; the scheduled server cleanup is
+// responsible for permanent deletion of Firestore documents and images.
+bool _announcementHasExpired(Map<String, dynamic> data) {
+  final value = data['expiresAt'];
+  return value is Timestamp && !value.toDate().isAfter(DateTime.now());
+}
+
+String _formatExpiration(DateTime value) {
+  final day = value.day.toString().padLeft(2, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final hours = value.hour.toString().padLeft(2, '0');
+  final minutes = value.minute.toString().padLeft(2, '0');
+  return '$day/$month/${value.year} $hours:$minutes';
+}

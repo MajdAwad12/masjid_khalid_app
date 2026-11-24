@@ -22,6 +22,32 @@ service firebase.storage {
       allow delete: if isAdmin();
     }
 
+    // Only administrators may upload images. Reading is allowed solely for
+    // published items (or for an administrator reviewing a hidden draft).
+    match /activities/{activityId}/images/{fileName} {
+      allow get: if isAdmin() ||
+        (firestore.exists(/databases/(default)/documents/activities/$(activityId)) &&
+        firestore.get(/databases/(default)/documents/activities/$(activityId)).data.isVisible == true);
+      allow list: if false;
+      allow create, update: if isAdmin()
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin();
+    }
+
+    match /homework/{homeworkId}/images/{fileName} {
+      allow get: if isAdmin() ||
+        (firestore.exists(/databases/(default)/documents/homework/$(homeworkId)) &&
+        firestore.get(/databases/(default)/documents/homework/$(homeworkId)).data.isVisible == true);
+      allow list: if false;
+      allow create, update: if isAdmin()
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin();
+    }
+
     // All other Storage files are inaccessible through client SDKs.
     match /{allPaths=**} {
       allow read, write: if false;

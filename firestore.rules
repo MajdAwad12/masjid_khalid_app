@@ -78,6 +78,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Public activities are published individually by admins only. Registration
+    // information is always private; ordinary devices use callable functions.
+    match /activities/{activityId} {
+      allow get, list: if isAdmin() || resource.data.isVisible == true;
+      allow create, update, delete: if false;
+    }
+
+    match /activity_registrations/{registrationId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /security_activity_limits/{limitId} {
+      allow read, write: if false;
+    }
+
+    // Homework is public only when its author publishes it.
+    match /homework/{homeworkId} {
+      allow get, list: if isAdmin() || resource.data.isVisible == true;
+      allow create, update, delete: if false;
+    }
+
     match /users/{uid} {
       allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
