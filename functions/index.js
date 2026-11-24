@@ -1127,3 +1127,8 @@ exports.cleanupDeletedAnnouncementImage = onDocumentDeleted({
     throw error;
   }
 });
+
+// Public course enrollment and strictly admin-only course administration.
+Object.assign(exports, require("./courses").makeCourseFunctions({
+  db, requireAdmin,
+}));

@@ -56,6 +56,28 @@ service cloud.firestore {
       }
     }
 
+    // Only published course cards are readable publicly. Administrators
+    // can view hidden and published courses. Public clients MUST query with
+    // where('isVisible', isEqualTo: true); rules are not data filters.
+    match /courses/{courseId} {
+      allow get, list: if isAdmin() || resource.data.isVisible == true;
+      allow create, update, delete: if false;
+    }
+
+    // Migration state is managed by an administrator-only Cloud Function.
+    match /security_course_migrations/{migrationId} {
+      allow read, write: if false;
+    }
+
+    match /course_registrations/{registrationId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /security_course_registration_limits/{limitId} {
+      allow read, write: if false;
+    }
+
     match /users/{uid} {
       allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();

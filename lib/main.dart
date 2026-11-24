@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -6,6 +8,8 @@ import 'services/theme_controller.dart';
 import 'firebase_options.dart';
 import 'screens/account_settings_page.dart';
 import 'screens/announcements_page.dart';
+import 'screens/courses_page.dart';
+import 'services/course_notifications_service.dart';
 import 'widgets/app_theme.dart';
 import 'widgets/editable_spiritual_card.dart';
 
@@ -49,6 +53,7 @@ Future<void> main() async {
 
   await themeController.load();
   runApp(const MasjidApp());
+  unawaited(CourseNotificationsService.instance.initialize());
 }
 
 // Replace with verified mosque contact information.
@@ -67,6 +72,7 @@ class MasjidApp extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'مسجد خالد بن الوليد',
+          scaffoldMessengerKey: courseMessengerKey,
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: selectedTheme,
@@ -115,11 +121,7 @@ class _MainScreenState extends State<MainScreen> {
       // Admin permissions come from Firebase Custom Claims.
       AnnouncementsPage(isAdmin: widget.isAdmin),
 
-      const SectionPage(
-        title: 'الدورات',
-        icon: Icons.school_outlined,
-        description: 'الدورات المتاحة والتسجيل فيها',
-      ),
+      CoursesPage(isAdmin: widget.isAdmin),
 
       const SectionPage(
         title: 'الأنشطة',
