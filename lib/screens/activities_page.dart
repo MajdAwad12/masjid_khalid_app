@@ -201,9 +201,7 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accent = item.kind == 'trip'
-        ? MosquePalette.ocean
-        : MosquePalette.emerald;
+    final accent = MosquePalette.emerald;
     final closed = item.registrationClosed || !item.isPublic;
     final full = item.isFull;
     return MosqueCardShell(

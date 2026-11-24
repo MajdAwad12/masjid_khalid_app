@@ -132,7 +132,6 @@ class _MainScreenState extends State<MainScreen> {
     final List<Widget> pages = [
       HomePage(isAdmin: widget.isAdmin),
 
-      // Admin permissions come from Firebase Custom Claims.
       AnnouncementsPage(isAdmin: widget.isAdmin),
 
       CoursesPage(isAdmin: widget.isAdmin),

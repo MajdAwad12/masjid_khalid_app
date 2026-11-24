@@ -1,4 +1,3 @@
-
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -52,14 +51,14 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
       builder: (dialogContext) => _AnnouncementEditorDialog(document: document),
     );
     if (!mounted || saved != true) return;
-    _showNotice(document == null
-        ? 'تم نشر الإعلان بنجاح'
-        : 'تم تعديل الإعلان بنجاح');
+    _showNotice(
+      document == null ? 'تم نشر الإعلان بنجاح' : 'تم تعديل الإعلان بنجاح',
+    );
   }
 
   Future<void> _deleteAnnouncement(
-      DocumentSnapshot<Map<String, dynamic>> document,
-      ) async {
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) async {
     if (_deletingId != null) return;
     final confirm = await showDialog<bool>(
       context: context,
@@ -93,13 +92,17 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
           if (error.code != 'object-not-found') imageCleanupFailed = true;
         }
       }
-      _showNotice(imageCleanupFailed
-          ? 'تم حذف الإعلان، لكن تعذر حذف صورته من التخزين'
-          : 'تم حذف الإعلان بنجاح');
+      _showNotice(
+        imageCleanupFailed
+            ? 'تم حذف الإعلان، لكن تعذر حذف صورته من التخزين'
+            : 'تم حذف الإعلان بنجاح',
+      );
     } on FirebaseException catch (error) {
-      _showNotice(error.code == 'permission-denied'
-          ? 'ليس لديك صلاحية لحذف الإعلانات'
-          : 'تعذر حذف الإعلان، حاول مرة أخرى');
+      _showNotice(
+        error.code == 'permission-denied'
+            ? 'ليس لديك صلاحية لحذف الإعلانات'
+            : 'تعذر حذف الإعلان، حاول مرة أخرى',
+      );
     } catch (_) {
       _showNotice('تعذر حذف الإعلان، حاول مرة أخرى');
     } finally {
@@ -118,22 +121,29 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
             const Center(
               child: Column(
                 children: [
-                  Icon(Icons.campaign_outlined,
-                      size: 42, color: AnnouncementColors.gold),
+                  Icon(
+                    Icons.campaign_outlined,
+                    size: 42,
+                    color: AnnouncementColors.gold,
+                  ),
                   SizedBox(height: 12),
-                  Text('إعلانات المسجد',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: AnnouncementColors.dark,
-                      )),
+                  Text(
+                    'إعلانات المسجد',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AnnouncementColors.dark,
+                    ),
+                  ),
                   SizedBox(height: 8),
-                  Text('تابع آخر الإعلانات والمستجدات',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: AnnouncementColors.muted,
-                      )),
+                  Text(
+                    'تابع آخر الإعلانات والمستجدات',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: AnnouncementColors.muted,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -170,25 +180,27 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                 ),
               )
             else if (snapshot.data!.docs.isEmpty)
-                const _StatusMessage(
-                  icon: Icons.inbox_outlined,
-                  message: 'لا توجد إعلانات حاليًا',
-                )
-              else
-              ...snapshot.data!.docs.map((document) => Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: AnnouncementCard(
-                      data: document.data(),
-                      isAdmin: widget.isAdmin,
-                      isDeleting: _deletingId == document.id,
-                      onEdit: _deletingId == null
-                          ? () => _openEditor(document: document)
-                          : null,
-                      onDelete: _deletingId == null
-                          ? () => _deleteAnnouncement(document)
-                          : null,
-                    ),
-                  )),
+              const _StatusMessage(
+                icon: Icons.inbox_outlined,
+                message: 'لا توجد إعلانات حاليًا',
+              )
+            else
+              ...snapshot.data!.docs.map(
+                (document) => Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: AnnouncementCard(
+                    data: document.data(),
+                    isAdmin: widget.isAdmin,
+                    isDeleting: _deletingId == document.id,
+                    onEdit: _deletingId == null
+                        ? () => _openEditor(document: document)
+                        : null,
+                    onDelete: _deletingId == null
+                        ? () => _deleteAnnouncement(document)
+                        : null,
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -290,7 +302,9 @@ class AnnouncementCard extends StatelessWidget {
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.delete_outline, size: 21),
                         color: Colors.red,
@@ -302,20 +316,24 @@ class AnnouncementCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          Text(title,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF211C17),
-              )),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF211C17),
+            ),
+          ),
           const SizedBox(height: 10),
-          Text(description,
-              style: const TextStyle(
-                fontSize: 16.5,
-                fontWeight: FontWeight.w500,
-                height: 1.7,
-                color: Color(0xFF302B25),
-              )),
+          Text(
+            description,
+            style: const TextStyle(
+              fontSize: 16.5,
+              fontWeight: FontWeight.w500,
+              height: 1.7,
+              color: Color(0xFF302B25),
+            ),
+          ),
           if (imageUrl.isNotEmpty) ...[
             const SizedBox(height: 15),
             ClipRRect(
@@ -328,8 +346,10 @@ class AnnouncementCard extends StatelessWidget {
                   return const Padding(
                     padding: EdgeInsets.all(16),
                     child: Center(
-                      child: Text('تعذر عرض الصورة',
-                          style: TextStyle(color: AnnouncementColors.muted)),
+                      child: Text(
+                        'تعذر عرض الصورة',
+                        style: TextStyle(color: AnnouncementColors.muted),
+                      ),
                     ),
                   );
                 },
@@ -342,14 +362,19 @@ class AnnouncementCard extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.calendar_today_outlined,
-                    size: 16, color: AnnouncementColors.gold),
+                const Icon(
+                  Icons.calendar_today_outlined,
+                  size: 16,
+                  color: AnnouncementColors.gold,
+                ),
                 const SizedBox(width: 8),
-                Text(formattedDate,
-                    style: const TextStyle(
-                      color: AnnouncementColors.muted,
-                      fontSize: 13,
-                    )),
+                Text(
+                  formattedDate,
+                  style: const TextStyle(
+                    color: AnnouncementColors.muted,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           ],
@@ -374,12 +399,14 @@ class _StatusMessage extends StatelessWidget {
           children: [
             Icon(icon, size: 55, color: AnnouncementColors.gold),
             const SizedBox(height: 16),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: AnnouncementColors.muted,
-                )),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                color: AnnouncementColors.muted,
+              ),
+            ),
           ],
         ),
       ),
@@ -463,13 +490,21 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
   }
 
   (String, String)? _detectImageFormat(Uint8List bytes) {
-    if (bytes.length >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 &&
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
         bytes[2] == 0xff) {
       return ('image/jpeg', 'jpg');
     }
-    if (bytes.length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 &&
-        bytes[2] == 0x4e && bytes[3] == 0x47 && bytes[4] == 0x0d &&
-        bytes[5] == 0x0a && bytes[6] == 0x1a && bytes[7] == 0x0a) {
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4e &&
+        bytes[3] == 0x47 &&
+        bytes[4] == 0x0d &&
+        bytes[5] == 0x0a &&
+        bytes[6] == 0x1a &&
+        bytes[7] == 0x0a) {
       return ('image/png', 'png');
     }
     if (bytes.length >= 12 &&
@@ -493,7 +528,8 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
       return;
     }
     setState(() => _isSaving = true);
-    final reference = widget.document?.reference ??
+    final reference =
+        widget.document?.reference ??
         FirebaseFirestore.instance.collection('announcements').doc();
     final oldImagePath = _existingImagePath;
     var nextImagePath = _removeCurrentImage ? '' : _existingImagePath;
@@ -501,7 +537,8 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     String? uploadedPath;
     try {
       if (_newImage != null) {
-        final path = 'announcements/${reference.id}/images/'
+        final path =
+            'announcements/${reference.id}/images/'
             'cover_${DateTime.now().microsecondsSinceEpoch}.$_extension';
         final imageRef = FirebaseStorage.instance.ref(path);
         uploadedPath = path;
@@ -552,12 +589,13 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           // A cleanup failure does not hide the original error.
         }
       }
-      _showError(error.code == 'permission-denied' ||
-          error.code == 'unauthorized'
-          ? 'ليس لديك صلاحية لحفظ الإعلان أو صورته'
-          : error.code == 'bucket-not-found'
-          ? 'يرجى إعداد Firebase Storage أولًا'
-          : 'تعذر حفظ الإعلان، حاول مرة أخرى');
+      _showError(
+        error.code == 'permission-denied' || error.code == 'unauthorized'
+            ? 'ليس لديك صلاحية لحفظ الإعلان أو صورته'
+            : error.code == 'bucket-not-found'
+            ? 'يرجى إعداد Firebase Storage أولًا'
+            : 'تعذر حفظ الإعلان، حاول مرة أخرى',
+      );
     } catch (_) {
       if (uploadedPath != null) {
         try {
@@ -574,10 +612,14 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final showOldImage = _newImage == null && !_removeCurrentImage &&
+    final showOldImage =
+        _newImage == null &&
+        !_removeCurrentImage &&
         _existingImageUrl.isNotEmpty;
     return AlertDialog(
-      title: Text(widget.document == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان'),
+      title: Text(
+        widget.document == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان',
+      ),
       content: SingleChildScrollView(
         child: SizedBox(
           width: 420,
@@ -592,7 +634,8 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
                   maxLength: 120,
                   textInputAction: TextInputAction.next,
                   decoration: const InputDecoration(
-                    labelText: 'عنوان الإعلان', border: OutlineInputBorder(),
+                    labelText: 'عنوان الإعلان',
+                    border: OutlineInputBorder(),
                   ),
                   validator: (value) {
                     final title = (value ?? '').trim();
@@ -622,35 +665,49 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
                   contentPadding: EdgeInsets.zero,
                   onChanged: _isSaving
                       ? null
-                      : (value) => setState(() => _isImportant = value ?? false),
+                      : (value) =>
+                            setState(() => _isImportant = value ?? false),
                 ),
                 const SizedBox(height: 6),
                 OutlinedButton.icon(
                   onPressed: _isSaving ? null : _pickImage,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(_newImage != null || showOldImage
-                      ? 'تغيير الصورة' : 'إضافة صورة (اختياري)'),
+                  label: Text(
+                    _newImage != null || showOldImage
+                        ? 'تغيير الصورة'
+                        : 'إضافة صورة (اختياري)',
+                  ),
                 ),
                 if (_newImage != null || showOldImage) ...[
                   const SizedBox(height: 10),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: _newImage != null
-                        ? Image.memory(_newImage!, height: 150,
-                        width: double.infinity, fit: BoxFit.contain)
-                        : Image.network(_existingImageUrl, height: 150,
-                        width: double.infinity, fit: BoxFit.contain),
+                        ? Image.memory(
+                            _newImage!,
+                            height: 150,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          )
+                        : Image.network(
+                            _existingImageUrl,
+                            height: 150,
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          ),
                   ),
                   TextButton.icon(
                     onPressed: _isSaving
                         ? null
                         : () => setState(() {
-                      _newImage = null;
-                      _removeCurrentImage = true;
-                    }),
+                            _newImage = null;
+                            _removeCurrentImage = true;
+                          }),
                     icon: const Icon(Icons.close, color: Colors.red),
-                    label: const Text('إزالة الصورة',
-                        style: TextStyle(color: Colors.red)),
+                    label: const Text(
+                      'إزالة الصورة',
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
                 ],
               ],
@@ -671,9 +728,10 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           ),
           child: _isSaving
               ? const SizedBox(
-            width: 18, height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : Text(widget.document == null ? 'نشر الإعلان' : 'حفظ التعديلات'),
         ),
       ],
