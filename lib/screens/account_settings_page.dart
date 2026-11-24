@@ -1,223 +1,215 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../auth/auth_service.dart';
-import '../widgets/app_theme.dart';
+import '../services/theme_controller.dart';
 import '../widgets/admin_recovery_email_card.dart';
-import 'users_management_interface_page.dart';
+import '../widgets/app_theme.dart';
+import 'admin_login_dialog.dart';
+import 'admins_management_page.dart';
+import 'change_admin_password_dialog.dart';
 
-// Account settings for regular users and administrators.
+/// Settings for every visitor, with additional controls for authenticated admins.
 class AccountSettingsPage extends StatelessWidget {
   final bool isAdmin;
+  final String managerName;
+  final String managerPhone;
 
-  const AccountSettingsPage({super.key, required this.isAdmin});
+  const AccountSettingsPage({
+    super.key,
+    required this.isAdmin,
+    required this.managerName,
+    required this.managerPhone,
+  });
 
-  String _value(Object? value) {
-    final text = value?.toString().trim() ?? '';
-    return text.isEmpty ? '—' : text;
-  }
-
-  // Sign out through Firebase Authentication.
   Future<void> _signOut(BuildContext context) async {
     try {
       await AuthService.signOut();
     } catch (_) {
-      if (!context.mounted) return;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تسجيل الخروج، حاول مرة أخرى')),
+        );
+      }
+    }
+  }
 
+  Future<void> _changePassword(BuildContext context) async {
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ChangeAdminPasswordDialog(),
+    );
+    if (updated == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر تسجيل الخروج، حاول مرة أخرى')),
+        const SnackBar(content: Text('تم تغيير كلمة المرور بنجاح')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
+    final scheme = Theme.of(context).colorScheme;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600),
-        child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-          children: [
-            // Settings header.
-            const Icon(
-              Icons.settings_outlined,
-              color: AppColors.gold,
-              size: 50,
-            ),
-
-            const SizedBox(height: 12),
-
-            const Text(
-              'إعدادات الحساب',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 23,
-                color: AppColors.dark,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 25),
-
-            // Read the current user's profile from Firestore.
-            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(child: Text('تعذر تحميل الملف الشخصي'));
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final profile = snapshot.data!.data();
-
-                if (profile == null) {
-                  return const Text(
-                    'لم يتم إنشاء الملف الشخصي لهذا الحساب بعد.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.muted),
-                  );
-                }
-
-                final firstName = profile['firstName']?.toString() ?? '';
-                final lastName = profile['lastName']?.toString() ?? '';
-
-                final fullName = '$firstName $lastName'.trim();
-
-                return Card(
-                  color: AppColors.surface,
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          fullName.isEmpty ? 'الملف الشخصي' : fullName,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.dark,
+        child: LayoutBuilder(
+          builder: (context, bounds) => SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 22),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: bounds.maxHeight - 44),
+              child: IntrinsicHeight(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Icon(
+                      Icons.settings_outlined,
+                      color: AppColors.gold,
+                      size: 40,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'الإعدادات',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'الدعم الفني',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 9),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(17),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text(
+                              'في حال وجود مشكلة تقنية في التطبيق، يرجى التواصل مع مسؤول المسجد.',
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'اسم المسؤول: $managerName',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              'رقم الهاتف: $managerPhone',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'المظهر',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 9),
+                    Card(
+                      child: ValueListenableBuilder<ThemeMode>(
+                        valueListenable: themeController,
+                        builder: (context, mode, child) =>
+                            SwitchListTile.adaptive(
+                              secondary: Icon(
+                                mode == ThemeMode.dark
+                                    ? Icons.dark_mode_outlined
+                                    : Icons.light_mode_outlined,
+                                color: scheme.primary,
+                              ),
+                              title: const Text('الوضع الليلي'),
+                              subtitle: Text(
+                                mode == ThemeMode.dark
+                                    ? 'مفعّل'
+                                    : 'الوضع النهاري مفعّل',
+                              ),
+                              value: mode == ThemeMode.dark,
+                              onChanged: (enabled) =>
+                                  themeController.setDarkMode(enabled),
+                            ),
+                      ),
+                    ),
+                    if (isAdmin) ...[
+                      const SizedBox(height: 24),
+                      Text(
+                        'إدارة النظام',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 9),
+                      const AdminRecoveryEmailCard(),
+                      const SizedBox(height: 12),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.admin_panel_settings_outlined,
+                          ),
+                          title: const Text('إدارة المسؤولين'),
+                          subtitle: const Text('إضافة مسؤول وإلغاء الصلاحيات'),
+                          trailing: const Icon(Icons.chevron_left),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const AdminsManagementPage(),
+                            ),
                           ),
                         ),
-
-                        const SizedBox(height: 12),
-
-                        Text('اسم المستخدم: ${_value(profile['username'])}'),
-
-                        const SizedBox(height: 7),
-
-                        Text('المدينة: ${_value(profile['city'])}'),
-
-                        const SizedBox(height: 7),
-
-                        Text('رقم الهاتف: ${_value(profile['phone'])}'),
-
-                        const SizedBox(height: 7),
-
-                        Text('العمر: ${_value(profile['age'])}'),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 14),
-
-            // Verified recovery email is required for each administrator.
-            if (isAdmin) ...[
-              const AdminRecoveryEmailCard(),
-              const SizedBox(height: 25),
-
-              const Text(
-                'إدارة النظام',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.dark,
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              Card(
-                color: AppColors.surface,
-                child: ListTile(
-                  leading: const Icon(
-                    Icons.manage_accounts_outlined,
-                    color: AppColors.gold,
-                  ),
-                  title: const Text(
-                    'إدارة المستخدمين',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: const Text(
-                    'عرض الحسابات وإدارة صلاحيات المستخدمين',
-                  ),
-                  trailing: const Icon(
-                    Icons.chevron_left,
-                    color: AppColors.muted,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const UsersManagementInterfacePage(),
                       ),
-                    );
-                  },
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.lock_outline),
+                          title: const Text('تغيير كلمة المرور'),
+                          subtitle: const Text('اختياري في أي وقت'),
+                          trailing: const Icon(Icons.chevron_left),
+                          onTap: () => _changePassword(context),
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    const SizedBox(height: 24),
+                    Align(
+                      alignment: Alignment.center,
+                      child: isAdmin
+                          ? TextButton.icon(
+                              onPressed: () => _signOut(context),
+                              icon: const Icon(Icons.logout, size: 17),
+                              label: const Text('تسجيل الخروج'),
+                            )
+                          : TextButton.icon(
+                              onPressed: () => showDialog<bool>(
+                                context: context,
+                                builder: (_) => const AdminLoginDialog(),
+                              ),
+                              icon: Icon(
+                                Icons.lock_outline,
+                                size: 15,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              label: Text(
+                                'دخول المسؤول',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                minimumSize: const Size(0, 38),
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-
-            const SizedBox(height: 25),
-
-            const Divider(),
-
-            const SizedBox(height: 14),
-
-            // Support section.
-            const Text(
-              'الدعم والمساعدة',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                color: AppColors.dark,
-              ),
             ),
-
-            const SizedBox(height: 8),
-
-            const Text(
-              'اسم المسؤول ورقم التواصل سيُضافان بعد تأكيد البيانات.',
-              style: TextStyle(color: AppColors.muted),
-            ),
-
-            const SizedBox(height: 28),
-
-            // Logout button.
-            OutlinedButton.icon(
-              onPressed: () => _signOut(context),
-              icon: const Icon(Icons.logout),
-              label: const Text('تسجيل الخروج'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.gold,
-                side: const BorderSide(color: AppColors.gold),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -24,6 +24,77 @@ class AppColors {
 class AppTheme {
   AppTheme._();
 
+  static ThemeData get darkTheme {
+    const background = Color(0xFF171B19);
+    const surface = Color(0xFF252B27);
+    const gold = Color(0xFFE5BD72);
+    const muted = Color(0xFFB5BDB5);
+
+    final scheme = ColorScheme.fromSeed(
+      seedColor: gold,
+      brightness: Brightness.dark,
+      surface: background,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: background,
+      colorScheme: scheme,
+      cardTheme: CardThemeData(
+        color: surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF404A42)),
+        ),
+      ),
+      appBarTheme: const AppBarThemeData(
+        backgroundColor: background,
+        foregroundColor: Color(0xFFF3F2EC),
+        centerTitle: true,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: surface,
+        selectedItemColor: gold,
+        unselectedItemColor: muted,
+        type: BottomNavigationBarType.fixed,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: gold,
+          foregroundColor: const Color(0xFF1E211C),
+          minimumSize: const Size(0, 52),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: gold,
+          minimumSize: const Size(0, 52),
+          side: const BorderSide(color: Color(0xFF444C46)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationThemeData(
+        filled: true,
+        fillColor: surface,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
+  }
+
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,

@@ -1,7 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 
-// Communicates with secure Firebase Cloud Functions.
-// Only authorized admins can perform management operations.
+/// Admin-only operations run on the server with Firebase Admin SDK.
 class AdminService {
   AdminService._();
 
@@ -9,74 +8,45 @@ class AdminService {
     region: 'us-central1',
   );
 
-  // Change a user's real role in Firebase Authentication
-  // and synchronize it with Cloud Firestore.
-  static Future<void> changeUserRole({
-    required String targetUid,
-    required String role,
+  static Future<void> createAdmin({
+    required String username,
+    required String password,
   }) async {
-    if (targetUid.trim().isEmpty || (role != 'admin' && role != 'user')) {
-      throw ArgumentError('Invalid user or role');
-    }
-
-    await _functions.httpsCallable('changeUserRole').call({
-      'targetUid': targetUid,
-      'role': role,
+    await _functions.httpsCallable('createAdminAccount').call({
+      'username': username.trim().toLowerCase(),
+      'password': password,
     });
   }
 
-  // Reset a regular user's password.
-  // The admin must verify the user's identity first.
-  static Future<void> resetUserPassword({
-    required String targetUid,
-    required String newPassword,
-    required bool identityVerified,
-  }) async {
-    if (targetUid.trim().isEmpty ||
-        newPassword.length < 12 ||
-        newPassword.length > 128 ||
-        !identityVerified) {
-      throw ArgumentError('Invalid password reset request');
-    }
-
-    await _functions.httpsCallable('resetUserPassword').call({
+  /// Deactivates another admin's access; their audit record is retained.
+  static Future<void> deactivateAdmin({required String targetUid}) async {
+    await _functions.httpsCallable('deactivateAdminAccount').call({
       'targetUid': targetUid,
-      'newPassword': newPassword,
-      'identityVerified': identityVerified,
     });
   }
 
-  // Display user-friendly Arabic error messages.
   static String errorMessage(Object error) {
-    if (error is ArgumentError) {
-      return 'تحقق من صحة البيانات المدخلة';
-    }
-
     if (error is FirebaseFunctionsException) {
       switch (error.code) {
         case 'unauthenticated':
-          return 'يرجى تسجيل الدخول أولاً';
-
+          return 'يرجى تسجيل الدخول أولًا';
         case 'permission-denied':
           return 'ليس لديك صلاحية تنفيذ هذه العملية';
-
+        case 'already-exists':
+          return 'اسم المستخدم مستخدم بالفعل';
         case 'not-found':
-          return 'لم يتم العثور على المستخدم';
-
+          return 'لم يتم العثور على المسؤول';
         case 'invalid-argument':
-          return 'البيانات المدخلة غير صحيحة';
-
+          return 'تحقق من اسم المستخدم وكلمة المرور (12 حرفًا على الأقل)';
         case 'failed-precondition':
-          return 'لا يمكن تنفيذ العملية في الحالة الحالية';
-
+          return 'أعد تسجيل الدخول أو تحقق من حالة المسؤولين';
+        case 'resource-exhausted':
+          return 'عملية إدارة أخرى قيد التنفيذ. حاول بعد قليل';
         case 'unavailable':
         case 'deadline-exceeded':
-          return 'تعذر الاتصال بالخادم، حاول مرة أخرى';
-        case 'resource-exhausted':
-          return 'يرجى الانتظار 60 ثانية قبل إعادة تعيين كلمة المرور مرة أخرى';
+          return 'تعذر الاتصال بالخادم، حاول مجددًا';
       }
     }
-
-    return 'حدث خطأ غير متوقع، حاول مرة أخرى';
+    return 'تعذر تنفيذ العملية، حاول مرة أخرى';
   }
 }

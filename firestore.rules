@@ -6,79 +6,92 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-
+    // Keep the existing admin profile as a second source of truth during
+    // migration. Only Cloud Functions may create/update admin profiles.
     function isAdmin() {
       return signedIn()
         && request.auth.token.admin == true
-        && exists(
-          /databases/$(database)/documents/users/$(request.auth.uid)
-        )
-        && get(
-          /databases/$(database)/documents/users/$(request.auth.uid)
-        ).data.role == 'admin';
-    }
-
-    function validProfile(data) {
-      return data.firstName is string
-        && data.firstName.size() > 0
-        && data.firstName.size() <= 80
-        && data.lastName is string
-        && data.lastName.size() > 0
-        && data.lastName.size() <= 80
-        && data.phone is string
-        && data.phone.matches('^[+]?[0-9]{8,15}$')
-        && data.city is string
-        && data.city.size() > 0
-        && data.city.size() <= 100
-        && data.age is int
-        && data.age >= 1
-        && data.age <= 120;
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
     match /announcements/{announcementId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow create, update: if isAdmin() && validExpiration();
+      allow delete: if isAdmin();
+
+      function validExpiration() {
+        return !('expiresAt' in request.resource.data)
+          || request.resource.data.expiresAt == null
+          || request.resource.data.expiresAt is timestamp;
+      }
+    }
+
+    // Public home card; only authenticated admins may change it.
+    // Never allow clients to write arbitrary app settings.
+    match /app_settings/{settingId} {
+      allow get: if settingId == 'home';
+      allow list: if false;
+      allow create, update: if settingId == 'home'
+        && isAdmin()
+        && validHomeCard();
+      allow delete: if false;
+
+      function validHomeCard() {
+        return request.resource.data.keys().hasOnly([
+            'visible', 'title', 'content', 'source', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasAll([
+            'visible', 'title', 'content', 'source', 'updatedAt', 'updatedBy'])
+          && request.resource.data.visible is bool
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 80
+          && request.resource.data.content is string
+          && request.resource.data.content.size() > 0
+          && request.resource.data.content.size() <= 1500
+          && request.resource.data.source is string
+          && request.resource.data.source.size() <= 200
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy == request.auth.uid;
+      }
+    }
+
+    // Only published course cards are readable publicly. Administrators
+    // can view hidden and published courses. Public clients MUST query with
+    // where('isVisible', isEqualTo: true); rules are not data filters.
+    match /courses/{courseId} {
+      allow get, list: if isAdmin() || resource.data.isVisible == true;
+      allow create, update, delete: if false;
+    }
+
+    // Migration state is managed by an administrator-only Cloud Function.
+    match /security_course_migrations/{migrationId} {
+      allow read, write: if false;
+    }
+
+    match /course_registrations/{registrationId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /security_course_registration_limits/{limitId} {
+      allow read, write: if false;
     }
 
     match /users/{uid} {
-      allow get: if signedIn()
-        && (request.auth.uid == uid || isAdmin());
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow list: if isAdmin();
-
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.keys().hasAll([
-          'firstName', 'lastName', 'username', 'phone',
-          'age', 'city', 'role', 'createdAt'
-        ])
-        && request.resource.data.keys().hasOnly([
-          'firstName', 'lastName', 'username', 'phone',
-          'age', 'city', 'role', 'createdAt'
-        ])
-        && validProfile(request.resource.data)
-        && request.resource.data.role == 'user'
-        && request.resource.data.username is string
-        && request.resource.data.username.matches('^[a-z0-9_]{3,20}$')
-        && request.auth.token.email ==
-          request.resource.data.username + '@accounts.masjid-khalid.example'
-        && request.resource.data.createdAt == request.time;
-
-      allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'firstName', 'lastName', 'phone', 'age', 'city'
-        ])
-        && validProfile(request.resource.data);
-
-      allow delete: if false;
+      // Public signup and any client-side profile/role modifications are disabled.
+      // Firebase Admin SDK in Cloud Functions bypasses client rules.
+      allow create, update, delete: if false;
     }
 
-    // Reset-cooldown timestamps are visible only to active admins.
-    // Only Cloud Functions (Admin SDK) may write these documents.
+    // Existing admin cooldown metadata remains server-owned.
     match /security_password_reset_limits/{uid} {
       allow get, list: if isAdmin();
       allow create, update, delete: if false;
     }
 
+    // Other collections are inaccessible to clients unless explicitly granted.
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,6 +29,7 @@ class AnnouncementsPage extends StatefulWidget {
 class _AnnouncementsPageState extends State<AnnouncementsPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _announcementsStream;
   String? _deletingId;
+  Timer? _expirationRefresh;
 
   @override
   void initState() {
@@ -36,6 +38,16 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
         .collection('announcements')
         .orderBy('publishedAt', descending: true)
         .snapshots();
+    // Recheck the time even when Firestore sends no new snapshot.
+    _expirationRefresh = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _expirationRefresh?.cancel();
+    super.dispose();
   }
 
   void _showNotice(String text) {
@@ -115,33 +127,39 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _announcementsStream,
       builder: (context, snapshot) {
+        final documents = snapshot.data?.docs ?? [];
+        final activeDocuments = widget.isAdmin
+            ? documents
+            : documents.where((document) {
+                return !_announcementHasExpired(document.data());
+              }).toList();
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           children: [
-            const Center(
+            Center(
               child: Column(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.campaign_outlined,
                     size: 42,
                     color: AnnouncementColors.gold,
                   ),
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                   Text(
-                    'إعلانات المسجد',
+                    'آخر الأخبار',
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: AnnouncementColors.dark,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    'تابع آخر الإعلانات والمستجدات',
+                    'تابع أخبار المسجد والمستجدات',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 15,
-                      color: AnnouncementColors.muted,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -179,13 +197,13 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                   ),
                 ),
               )
-            else if (snapshot.data!.docs.isEmpty)
+            else if (activeDocuments.isEmpty)
               const _StatusMessage(
                 icon: Icons.inbox_outlined,
                 message: 'لا توجد إعلانات حاليًا',
               )
             else
-              ...snapshot.data!.docs.map(
+              ...activeDocuments.map(
                 (document) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: AnnouncementCard(
@@ -227,10 +245,17 @@ class AnnouncementCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final title = (data['title'] ?? '').toString();
     final description = (data['description'] ?? '').toString();
     final isImportant = data['isImportant'] == true;
     final imageUrl = (data['imageUrl'] ?? '').toString().trim();
+    final expirationValue = data['expiresAt'];
+    final expirationDate = expirationValue is Timestamp
+        ? expirationValue.toDate().toLocal()
+        : null;
+    final isExpired = _announcementHasExpired(data);
     final publishedAt = data['publishedAt'];
     final DateTime? date = publishedAt is Timestamp
         ? publishedAt.toDate()
@@ -242,16 +267,18 @@ class AnnouncementCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF252B27) : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isImportant
               ? const Color(0xFFE3C991)
+              : isDark
+              ? const Color(0xFF404A42)
               : AnnouncementColors.border,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
+            color: Colors.black.withValues(alpha: isDark ? 0.0 : 0.035),
             blurRadius: 15,
             offset: const Offset(0, 5),
           ),
@@ -318,20 +345,20 @@ class AnnouncementCard extends StatelessWidget {
           ],
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 25,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF211C17),
+              color: scheme.onSurface,
             ),
           ),
           const SizedBox(height: 10),
           Text(
             description,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
               height: 1.7,
-              color: Color(0xFF302B25),
+              color: scheme.onSurface,
             ),
           ),
           if (imageUrl.isNotEmpty) ...[
@@ -343,12 +370,12 @@ class AnnouncementCard extends StatelessWidget {
                 width: double.infinity,
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) {
-                  return const Padding(
-                    padding: EdgeInsets.all(16),
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
                     child: Center(
                       child: Text(
                         'تعذر عرض الصورة',
-                        style: TextStyle(color: AnnouncementColors.muted),
+                        style: TextStyle(color: scheme.onSurfaceVariant),
                       ),
                     ),
                   );
@@ -356,9 +383,23 @@ class AnnouncementCard extends StatelessWidget {
               ),
             ),
           ],
+          if (isAdmin && expirationDate != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              isExpired
+                  ? 'انتهت مدة هذا الخبر'
+                  : 'ينتهي النشر: ${_formatExpiration(expirationDate)}',
+              style: TextStyle(
+                fontSize: 13,
+                color: isExpired
+                    ? Colors.red.shade400
+                    : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           if (formattedDate.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Divider(color: AnnouncementColors.border),
+            Divider(color: scheme.outlineVariant),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -370,8 +411,8 @@ class AnnouncementCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   formattedDate,
-                  style: const TextStyle(
-                    color: AnnouncementColors.muted,
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
                     fontSize: 13,
                   ),
                 ),
@@ -402,9 +443,9 @@ class _StatusMessage extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
-                color: AnnouncementColors.muted,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -431,6 +472,8 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   bool _isImportant = false;
+  bool _useExpiration = false;
+  DateTime? _expiresAt;
   bool _isSaving = false;
   Uint8List? _newImage;
   String? _imageContentType;
@@ -447,6 +490,11 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     _titleController.text = (data['title'] ?? '').toString();
     _descriptionController.text = (data['description'] ?? '').toString();
     _isImportant = data['isImportant'] == true;
+    final expiresAt = data['expiresAt'];
+    if (expiresAt is Timestamp) {
+      _useExpiration = true;
+      _expiresAt = expiresAt.toDate().toLocal();
+    }
     _existingImageUrl = (data['imageUrl'] ?? '').toString();
     _existingImagePath = (data['imagePath'] ?? '').toString();
   }
@@ -520,8 +568,50 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
+  Future<void> _pickExpiration() async {
+    if (_isSaving) return;
+    final now = DateTime.now();
+    final suggested = _expiresAt ?? now.add(const Duration(days: 7));
+    final today = DateTime(now.year, now.month, now.day);
+    final initial = suggested.isBefore(today) ? today : suggested;
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: today,
+      lastDate: DateTime(now.year + 5, 12, 31),
+    );
+    if (selectedDate == null || !mounted) return;
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(
+        _expiresAt ?? now.add(const Duration(hours: 1)),
+      ),
+    );
+    if (selectedTime == null || !mounted) return;
+    final expiration = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+      selectedTime.hour,
+      selectedTime.minute,
+    );
+    if (!expiration.isAfter(DateTime.now())) {
+      _showError('يرجى تحديد موعد مستقبلي لانتهاء النشر');
+      return;
+    }
+    setState(() => _expiresAt = expiration);
+  }
+
   Future<void> _save() async {
     if (_isSaving || !_formKey.currentState!.validate()) return;
+    if (_useExpiration &&
+        (_expiresAt == null || !_expiresAt!.isAfter(DateTime.now()))) {
+      _showError('يرجى تحديد تاريخ ووقت مستقبلي لانتهاء النشر');
+      return;
+    }
+    final expirationField = _useExpiration
+        ? Timestamp.fromDate(_expiresAt!)
+        : null;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _showError('يرجى تسجيل الدخول أولًا');
@@ -555,6 +645,7 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           'title': _titleController.text.trim(),
           'description': _descriptionController.text.trim(),
           'isImportant': _isImportant,
+          'expiresAt': expirationField,
           'imageUrl': nextImageUrl,
           'imagePath': nextImagePath,
           'publishedAt': FieldValue.serverTimestamp(),
@@ -565,6 +656,7 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
           'title': _titleController.text.trim(),
           'description': _descriptionController.text.trim(),
           'isImportant': _isImportant,
+          'expiresAt': expirationField,
           'imageUrl': nextImageUrl,
           'imagePath': nextImagePath,
           'updatedAt': FieldValue.serverTimestamp(),
@@ -668,6 +760,35 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
                       : (value) =>
                             setState(() => _isImportant = value ?? false),
                 ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  title: const Text('تحديد موعد لانتهاء النشر (اختياري)'),
+                  subtitle: const Text(
+                    'عند إلغاء التحديد يبقى الخبر منشورًا دون موعد انتهاء.',
+                  ),
+                  value: _useExpiration,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AnnouncementColors.gold,
+                  onChanged: _isSaving
+                      ? null
+                      : (value) => setState(() {
+                          _useExpiration = value ?? false;
+                          if (!_useExpiration) _expiresAt = null;
+                        }),
+                ),
+                if (_useExpiration) ...[
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    onPressed: _isSaving ? null : _pickExpiration,
+                    icon: const Icon(Icons.event_outlined),
+                    label: Text(
+                      _expiresAt == null
+                          ? 'اختيار التاريخ والساعة'
+                          : 'ينتهي: ${_formatExpiration(_expiresAt!)}',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 const SizedBox(height: 6),
                 OutlinedButton.icon(
                   onPressed: _isSaving ? null : _pickImage,
@@ -741,4 +862,19 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
 
 bool _isOwnedImagePath(String announcementId, String path) {
   return path.startsWith('announcements/$announcementId/images/');
+}
+
+// Date checks are local to the display; the scheduled server cleanup is
+// responsible for permanent deletion of Firestore documents and images.
+bool _announcementHasExpired(Map<String, dynamic> data) {
+  final value = data['expiresAt'];
+  return value is Timestamp && !value.toDate().isAfter(DateTime.now());
+}
+
+String _formatExpiration(DateTime value) {
+  final day = value.day.toString().padLeft(2, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final hours = value.hour.toString().padLeft(2, '0');
+  final minutes = value.minute.toString().padLeft(2, '0');
+  return '$day/$month/${value.year} $hours:$minutes';
 }
