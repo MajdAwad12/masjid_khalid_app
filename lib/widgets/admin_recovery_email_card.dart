@@ -1,8 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'app_theme.dart';
-
 /// Admin-only settings section. The server owns the verified-email state.
 class AdminRecoveryEmailCard extends StatefulWidget {
   const AdminRecoveryEmailCard({super.key});
@@ -95,9 +93,9 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
       _success = null;
     });
     try {
-      await _functions.httpsCallable('requestAdminRecoveryEmailVerification').call({
-        'email': _emailController.text.trim(),
-      });
+      await _functions
+          .httpsCallable('requestAdminRecoveryEmailVerification')
+          .call({'email': _emailController.text.trim()});
       if (!mounted) return;
       setState(() {
         _success = 'تم إرسال رابط التحقق. افتح بريدك واضغط على تأكيد البريد.';
@@ -120,12 +118,12 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        Text(
           'البريد الإلكتروني لاستعادة حساب المسؤول',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.bold,
-            color: AppColors.dark,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 9),
@@ -138,18 +136,26 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: verified ? const Color(0xFFEAF6EE) : const Color(0xFFFFEBEE),
+              color: verified
+                  ? const Color(0xFFEAF6EE)
+                  : const Color(0xFFFFEBEE),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: verified ? const Color(0xFF388E3C) : const Color(0xFFC62828),
+                color: verified
+                    ? const Color(0xFF388E3C)
+                    : const Color(0xFFC62828),
               ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  verified ? Icons.verified_user_outlined : Icons.warning_amber_rounded,
-                  color: verified ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+                  verified
+                      ? Icons.verified_user_outlined
+                      : Icons.warning_amber_rounded,
+                  color: verified
+                      ? const Color(0xFF2E7D32)
+                      : const Color(0xFFC62828),
                 ),
                 const SizedBox(width: 9),
                 Expanded(
@@ -157,9 +163,11 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
                     verified
                         ? 'تم تأكيد بريد الاسترداد: $_verifiedEmail'
                         : 'تنبيه مهم: يجب على كل مسؤول إضافة بريد إلكتروني شخصي '
-                        'وتأكيده لاستعادة كلمة المرور عند نسيانها.',
+                              'وتأكيده لاستعادة كلمة المرور عند نسيانها.',
                     style: TextStyle(
-                      color: verified ? const Color(0xFF1B5E20) : const Color(0xFFB71C1C),
+                      color: verified
+                          ? const Color(0xFF1B5E20)
+                          : const Color(0xFFB71C1C),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -171,7 +179,9 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
             const SizedBox(height: 8),
             Text(
               'بانتظار تأكيد البريد: $_pendingEmail',
-              style: const TextStyle(color: AppColors.muted),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
           if (verified && !_showForm) ...[
@@ -233,10 +243,13 @@ class _AdminRecoveryEmailCardState extends State<AdminRecoveryEmailCard> {
               label: const Text('تحديث حالة التحقق'),
             ),
           ),
-          const Text(
+          Text(
             'لن يصبح البريد صالحًا لاستعادة كلمة المرور إلا بعد تأكيد الرابط '
-                'المرسل إليه. لا يتغير اسم المستخدم أو بريد Firebase الداخلي.',
-            style: TextStyle(fontSize: 12, color: AppColors.muted),
+            'المرسل إليه. لا يتغير اسم المستخدم أو بريد Firebase الداخلي.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ],

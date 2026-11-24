@@ -5,7 +5,12 @@ const crypto = require("node:crypto");
 const {setGlobalOptions} = require("firebase-functions/v2");
 const {initializeApp} = require("firebase-admin/app");
 const {getAuth} = require("firebase-admin/auth");
-const {getFirestore} = require("firebase-admin/firestore");
+const {getStorage} = require("firebase-admin/storage");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
+const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
+const {
+  getFirestore, FieldValue, Timestamp,
+} = require("firebase-admin/firestore");
 const logger = require("firebase-functions/logger");
 const {defineSecret} = require("firebase-functions/params");
 const nodemailer = require("nodemailer");
@@ -86,154 +91,369 @@ const findUser = async (uid) => {
   }
 };
 
-// Change the user's role in Authentication and Firestore.
-exports.changeUserRole = onCall(async (request) => {
-  const adminUid = await requireAdmin(request);
-  const targetUid = validateUid(request.data?.targetUid);
-  const role = request.data?.role;
-  if (role !== "admin" && role !== "user") {
-    throw new HttpsError("invalid-argument", "Invalid role.");
-  }
-  if (targetUid === adminUid && role === "user") {
-    throw new HttpsError(
-        "failed-precondition",
-        "You cannot remove your own admin role.",
-    );
-  }
+// Admin login cooldown. This is enforced by the callable sign-in endpoint.
+// It is scoped to the network source IP, across all attempted usernames.
+// NOTE: a shared network IP can affect multiple users on the same network.
+// NOTE: Firebase's direct password sign-in endpoint is separately available;
+// see README_ADMIN_LOGIN_COOLDOWN.md for the enforcement boundary.
+const loginAttemptRecords = db.collection("security_admin_login_attempts");
+const fifteenMinutesMs = 15 * 60 * 1000;
+const oneDayMs = 24 * 60 * 60 * 1000;
 
-  const target = await findUser(targetUid);
-  const profileRef = db.collection("users").doc(targetUid);
-  const profile = await profileRef.get();
-  if (!profile.exists) {
-    throw new HttpsError("not-found", "User profile not found.");
+const attemptRecord = (request) => {
+  // Do not trust X-Forwarded-For supplied by a client. Cloud Functions
+  // exposes the resolved peer IP here.
+  const ip = request.rawRequest?.ip;
+  if (typeof ip !== "string" || ip.length === 0) {
+    throw new HttpsError("unavailable", "Unable to verify login source.");
   }
+  const key = crypto.createHash("sha256")
+      .update(`admin-login-source\0${ip}`).digest("hex");
+  return loginAttemptRecords.doc(key);
+};
 
-  const previousClaims = {...(target.customClaims || {})};
-  const newClaims = {...previousClaims};
-  if (role === "admin") {
-    newClaims.admin = true;
-  } else {
-    delete newClaims.admin;
+const activePenalty = (data, now) => {
+  const until = Number(data?.blockedUntilMs) || 0;
+  if (until > now) {
+    return {
+      blockedUntilMs: until,
+      waitSeconds: Math.ceil((until - now) / 1000),
+    };
   }
+  return null;
+};
 
-  await auth.setCustomUserClaims(targetUid, newClaims);
-  try {
-    await profileRef.update({role: role});
-  } catch (error) {
-    // Attempt to restore the previous claims if the profile update fails.
-    try {
-      await auth.setCustomUserClaims(targetUid, previousClaims);
-    } catch (rollbackError) {
-      logger.error("Role rollback failed", {
-        targetUid: targetUid,
-        error: rollbackError,
-      });
+const loginBlocked = (penalty) => new HttpsError(
+    "resource-exhausted", "Admin sign-in temporarily unavailable.",
+    {waitSeconds: penalty.waitSeconds},
+);
+
+const ensureNotLoginBlocked = async (ref) => {
+  const snapshot = await ref.get();
+  const penalty = activePenalty(snapshot.data(), Date.now());
+  if (penalty) throw loginBlocked(penalty);
+};
+
+// Every failed credential check is counted server-side in a transaction.
+// 3 failures => 15 minute pause. A *further* failed attempt after the pause
+// => 24 hour pause. After 24 hours of inactivity, the penalty escalator resets.
+const noteAdminLoginFailure = async (ref) => {
+  const now = Date.now();
+  const penalty = await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    const data = snapshot.data() || {};
+    const existing = activePenalty(data, now);
+    if (existing) return existing;
+
+    let stage = Number(data.stage) || 0;
+    const oldUntil = Number(data.blockedUntilMs) || 0;
+    // First escalation window expires after an additional 24h of inactivity.
+    if (stage === 1 && now > oldUntil + oneDayMs) stage = 0;
+    // A completed 24-hour block always restarts at level zero.
+    if (stage === 2 && now >= oldUntil) stage = 0;
+
+    let failureCount = Number(data.failureCount) || 0;
+    let blockedUntilMs = 0;
+    if (stage === 1) {
+      stage = 2;
+      failureCount = 0;
+      blockedUntilMs = now + oneDayMs;
+    } else {
+      failureCount += 1;
+      if (failureCount >= 3) {
+        stage = 1;
+        failureCount = 0;
+        blockedUntilMs = now + fifteenMinutesMs;
+      }
     }
-    logger.error("Role synchronization failed", {targetUid: targetUid});
-    throw new HttpsError(
-        "internal",
-        "Could not synchronize user permissions.",
-    );
+    tx.set(ref, {
+      stage: stage,
+      failureCount: failureCount,
+      blockedUntilMs: blockedUntilMs,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return blockedUntilMs > now ? {
+      blockedUntilMs: blockedUntilMs,
+      waitSeconds: Math.ceil((blockedUntilMs - now) / 1000),
+    } : null;
+  });
+  return penalty;
+};
+
+const clearLoginFailureOnSuccess = async (ref) => {
+  await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    const penalty = activePenalty(snapshot.data(), Date.now());
+    if (penalty) throw loginBlocked(penalty);
+    if (snapshot.exists) tx.delete(ref);
+  });
+};
+
+// Authenticate credentials against Firebase Auth on the server so incorrect
+// passwords are counted even if a modified client omits a failure callback.
+// An API key is a public Firebase application identifier, not a secret.
+exports.loginAdminWithCooldown = onCall({
+  region: "us-central1",
+  invoker: "public",
+  maxInstances: 5,
+}, async (request) => {
+  const username = typeof request.data?.username === "string" ?
+    request.data.username.trim().toLowerCase() : "";
+  const password = request.data?.password;
+  const apiKey = request.data?.apiKey;
+  if (username.length > 128 ||
+      typeof password !== "string" || password.length === 0 ||
+      password.length > 128 ||
+      typeof apiKey !== "string" || apiKey.length < 20 ||
+      apiKey.length > 256) {
+    throw new HttpsError("invalid-argument", "Invalid sign-in request.");
   }
 
-  logger.info("User role changed", {
-    adminUid: adminUid,
-    targetUid: targetUid,
-    role: role,
-  });
-  return {success: true, role: role};
+  const ref = attemptRecord(request);
+  await ensureNotLoginBlocked(ref);
+  // Count all submitted credentials, including unknown or malformed usernames.
+  // Never reveal whether a particular administrator username exists.
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+    const penalty = await noteAdminLoginFailure(ref);
+    if (penalty) throw loginBlocked(penalty);
+    throw new HttpsError(
+        "permission-denied", "Invalid username or password.");
+  }
+  let result;
+  try {
+    const signInUrl =
+        "https://identitytoolkit.googleapis.com/v1/" +
+        "accounts:signInWithPassword" +
+        `?key=${encodeURIComponent(apiKey)}`;
+    const response = await fetch(signInUrl, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        email: `${username}@${internalDomain}`,
+        password: password,
+        returnSecureToken: true,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.status === 400) {
+      const penalty = await noteAdminLoginFailure(ref);
+      if (penalty) throw loginBlocked(penalty);
+      throw new HttpsError(
+          "permission-denied", "Invalid username or password.");
+    }
+    if (!response.ok) {
+      throw new HttpsError(
+          "unavailable", "Authentication service unavailable.");
+    }
+    result = await response.json();
+    if (typeof result.idToken !== "string") {
+      throw new HttpsError("unavailable", "No valid authentication token.");
+    }
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    logger.warn("Administrator authentication request failed", {
+      code: error.code || "network-error",
+    });
+    throw new HttpsError(
+        "unavailable", "Authentication temporarily unavailable.");
+  }
+
+  try {
+    // Validates project, audience, signature and expiration of the ID token.
+    const identity = await auth.verifyIdToken(result.idToken);
+    const account = await auth.getUser(identity.uid);
+    const profile = await db.collection("users").doc(identity.uid).get();
+    if (account.disabled || account.customClaims?.admin !== true ||
+        profile.data()?.role !== "admin") {
+      const penalty = await noteAdminLoginFailure(ref);
+      if (penalty) throw loginBlocked(penalty);
+      throw new HttpsError(
+          "permission-denied", "Invalid username or password.");
+    }
+    await clearLoginFailureOnSuccess(ref);
+    // Never return the password, ID token or refresh token from the REST call.
+    const customToken = await auth.createCustomToken(identity.uid);
+    return {customToken: customToken};
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    logger.error("Admin sign-in verification failed", {
+      code: error.code || "unknown",
+    });
+    throw new HttpsError(
+        "unavailable", "Could not complete administrator login.");
+  }
 });
 
-// Reset a regular user's password with admin approval and a 60-second cooldown.
-exports.resetUserPassword = onCall(async (request) => {
-  const adminUid = await requireAdmin(request);
+// Legacy endpoints are kept temporarily so deployment disables them safely.
+// Public user accounts and promotions are no longer part of this application.
+exports.changeUserRole = onCall({
+  region: "us-central1", invoker: "public",
+}, async (request) => {
+  await requireAdmin(request);
+  throw new HttpsError("failed-precondition", "Use admin management instead.");
+});
 
+exports.resetUserPassword = onCall({
+  region: "us-central1", invoker: "public",
+}, async (request) => {
+  await requireAdmin(request);
+  throw new HttpsError("failed-precondition", "Public accounts are retired.");
+});
+
+// Creating an admin never uses the client FirebaseAuth.createUser API, which
+// would replace the signed-in admin. The server is the only account creator.
+const adminUsernamePattern = /^[a-z0-9_]{3,20}$/;
+const internalDomain = "accounts.masjid-khalid.example";
+
+const requireRecentAdmin = async (request) => {
+  const uid = await requireAdmin(request);
   const authTime = Number(request.auth.token.auth_time);
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  if (!Number.isFinite(authTime) ||
-      authTime <= 0 ||
-      nowSeconds - authTime > 600 ||
-      authTime > nowSeconds + 60) {
+  const now = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(authTime) || authTime <= 0 ||
+      now - authTime > 600 || authTime > now + 60) {
     throw new HttpsError(
-        "failed-precondition",
-        "Administrator must sign in again before resetting passwords.",
-    );
+        "failed-precondition", "Sign in again before managing admins.");
   }
+  return uid;
+};
 
-  const targetUid = validateUid(request.data?.targetUid);
-  const newPassword = request.data?.newPassword;
-  const identityVerified = request.data?.identityVerified;
-  if (identityVerified !== true) {
-    throw new HttpsError(
-        "failed-precondition",
-        "Verify the user's identity before resetting.",
-    );
+exports.createAdminAccount = onCall({
+  region: "us-central1", invoker: "public",
+}, async (request) => {
+  const adminUid = await requireRecentAdmin(request);
+  const username = typeof request.data?.username === "string" ?
+    request.data.username.trim().toLowerCase() : "";
+  const password = request.data?.password;
+  if (!adminUsernamePattern.test(username) ||
+      typeof password !== "string" ||
+      password.length < 12 || password.length > 128) {
+    throw new HttpsError("invalid-argument", "Invalid credentials.");
   }
-  if (typeof newPassword !== "string" ||
-      newPassword.length < 12 ||
-      newPassword.length > 128) {
-    throw new HttpsError(
-        "invalid-argument",
-        "Password must contain 12-128 characters.",
-    );
-  }
-
-  const target = await findUser(targetUid);
-  const profile = await db.collection("users").doc(targetUid).get();
-  if (!profile.exists) {
-    throw new HttpsError("not-found", "User profile not found.");
-  }
-  if (target.customClaims?.admin === true ||
-      profile.data()?.role !== "user") {
-    throw new HttpsError(
-        "permission-denied",
-        "Only regular user passwords can be reset.",
-    );
-  }
-
-  const cooldownRef = db
-      .collection("security_password_reset_limits")
-      .doc(targetUid);
-  const nowMs = Date.now();
-  const cooldownMs = 60 * 1000;
-
-  // Persist the cooldown, which the Flutter UI also reads for its timer.
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(cooldownRef);
-    const lastAttempt = snapshot.data()?.lastAttemptAtMs;
-    if (typeof lastAttempt === "number" &&
-        nowMs - lastAttempt < cooldownMs) {
-      throw new HttpsError(
-          "resource-exhausted",
-          "Please wait before resetting this user's password again.",
-      );
-    }
-
-    transaction.set(cooldownRef, {
-      lastAttemptAtMs: nowMs,
-      adminUid: adminUid,
-    });
-  });
-
-  let passwordChanged = false;
+  let created;
   try {
-    await auth.updateUser(targetUid, {password: newPassword});
-    passwordChanged = true;
-    await auth.revokeRefreshTokens(targetUid);
-  } catch (error) {
-    logger.error("Password reset failed or partially completed", {
-      adminUid: adminUid,
-      targetUid: targetUid,
-      passwordChanged: passwordChanged,
+    created = await auth.createUser({
+      email: `${username}@${internalDomain}`,
+      password: password,
+      disabled: false,
     });
-    throw new HttpsError("internal", "Could not complete password reset.");
+  } catch (error) {
+    if (error.code === "auth/email-already-exists") {
+      throw new HttpsError("already-exists", "Username is already in use.");
+    }
+    logger.error("Admin Auth creation failed", {code: error.code || "unknown"});
+    throw new HttpsError("internal", "Could not create administrator.");
   }
 
-  logger.info("User password reset", {
-    adminUid: adminUid,
-    targetUid: targetUid,
+  const profileRef = db.collection("users").doc(created.uid);
+  try {
+    await auth.setCustomUserClaims(created.uid, {admin: true});
+    // Only the four agreed profile fields are stored in users/{uid}.
+    // Passwords and Auth claims live in Firebase Authentication; recovery
+    // email details remain in the server-only security_* collections.
+    await profileRef.set({
+      username: username,
+      role: "admin",
+      createdAt: FieldValue.serverTimestamp(),
+      createdBy: adminUid,
+    });
+  } catch (error) {
+    // Compensate if one system succeeds and the other fails.
+    try {
+      await profileRef.delete();
+      await auth.deleteUser(created.uid);
+    } catch (rollbackError) {
+      logger.error("Admin creation rollback failed", {
+        uid: created.uid,
+        code: rollbackError.code || "unknown",
+      });
+    }
+    logger.error("Admin creation failed", {code: error.code || "unknown"});
+    throw new HttpsError("internal", "Could not finish admin creation.");
+  }
+  logger.info("Administrator created", {
+    actorUid: adminUid, targetUid: created.uid,
   });
-  return {success: true};
+  return {success: true, uid: created.uid};
+});
+
+// Serializes deactivations so two admins cannot disable each other in parallel.
+// The lock is server-only and has a lease to recover after interrupted calls.
+const adminDisableLock = db.collection("security_admin_management")
+    .doc("disable_lock");
+exports.deactivateAdminAccount = onCall({
+  region: "us-central1", invoker: "public",
+}, async (request) => {
+  const adminUid = await requireRecentAdmin(request);
+  const targetUid = validateUid(request.data?.targetUid);
+  if (targetUid === adminUid) {
+    throw new HttpsError(
+        "failed-precondition", "Cannot disable your own account.");
+  }
+  const lockId = crypto.randomUUID();
+  await db.runTransaction(async (tx) => {
+    const lock = await tx.get(adminDisableLock);
+    const acquired = Number(lock.data()?.atMs) || 0;
+    if (acquired > Date.now() - 120000) {
+      throw new HttpsError("resource-exhausted", "Admin change in progress.");
+    }
+    tx.set(adminDisableLock, {lockId: lockId, atMs: Date.now()});
+  });
+
+  try {
+    // Verify the caller still has privileges after waiting for the lock.
+    await requireAdmin(request);
+    const adminDocs = await db.collection("users")
+        .where("role", "==", "admin").get();
+    if (adminDocs.size <= 1) {
+      throw new HttpsError(
+          "failed-precondition", "Last admin cannot be disabled.");
+    }
+    const profileRef = db.collection("users").doc(targetUid);
+    const profile = await profileRef.get();
+    const target = await findUser(targetUid);
+    if (!profile.exists || profile.data()?.role !== "admin" ||
+        target.disabled || target.customClaims?.admin !== true) {
+      throw new HttpsError("failed-precondition", "Active admin not found.");
+    }
+    const originalClaims = {...(target.customClaims || {})};
+    const newClaims = {...originalClaims};
+    delete newClaims.admin;
+    try {
+      await auth.updateUser(targetUid, {disabled: true});
+      await auth.setCustomUserClaims(targetUid, newClaims);
+      // Deactivation must not add fields outside the agreed schema.
+      // Audit actors are already recorded in the server logs.
+      await profileRef.update({role: "disabled"});
+    } catch (error) {
+      // Best effort rollback: preserve working admin if Firestore fails.
+      try {
+        await auth.setCustomUserClaims(targetUid, originalClaims);
+        await auth.updateUser(targetUid, {disabled: false});
+      } catch (rollbackError) {
+        logger.error("Admin disable rollback failed", {
+          targetUid: targetUid,
+          code: rollbackError.code || "unknown",
+        });
+      }
+      logger.error("Admin disable failed", {code: error.code || "unknown"});
+      throw new HttpsError("internal", "Could not disable administrator.");
+    }
+    logger.info("Administrator deactivated", {
+      actorUid: adminUid, targetUid: targetUid,
+    });
+    return {success: true};
+  } finally {
+    try {
+      await db.runTransaction(async (tx) => {
+        const lock = await tx.get(adminDisableLock);
+        if (lock.data()?.lockId === lockId) tx.delete(adminDisableLock);
+      });
+    } catch (error) {
+      logger.error("Admin management lock release failed", {
+        code: error.code || "unknown",
+      });
+    }
+  }
 });
 
 // TEMPORARY DEVELOPMENT TEST. Remove this callable before production.
@@ -835,5 +1055,75 @@ exports.finishAdminPasswordRecovery = onRequest({
       code: error.code || "invalid-or-expired",
     });
     return res.status(400).json({success: false});
+  }
+});
+
+// Expiring news: announcements without expiresAt remain published forever.
+// The UI hides expired items immediately, while this job deletes expired
+// Firestore documents at most a few minutes later. In each transaction we
+// re-read the document so a manager's recent edit is not accidentally lost.
+exports.deleteExpiredAnnouncements = onSchedule({
+  schedule: "every 5 minutes",
+  region: "us-central1",
+  timeZone: "Etc/UTC",
+  maxInstances: 1,
+}, async () => {
+  const now = Timestamp.now();
+  const expired = await db.collection("announcements")
+      .where("expiresAt", "<=", now)
+      .orderBy("expiresAt")
+      .limit(100).get();
+  let removed = 0;
+  for (const snapshot of expired.docs) {
+    try {
+      const didDelete = await db.runTransaction(async (tx) => {
+        const current = await tx.get(snapshot.ref);
+        if (!current.exists) return false;
+        const expiration = current.get("expiresAt");
+        if (!(expiration instanceof Timestamp) ||
+            expiration.toMillis() > Date.now()) {
+          return false;
+        }
+        tx.delete(snapshot.ref);
+        return true;
+      });
+      if (didDelete) removed += 1;
+    } catch (error) {
+      logger.error("Could not remove expired announcement", {
+        announcementId: snapshot.id,
+        code: error.code || "unknown",
+      });
+    }
+  }
+  logger.info("Expired announcement cleanup completed", {
+    scanned: expired.size,
+    removed: removed,
+  });
+});
+
+// Clean Storage on ANY announcement deletion (manual or scheduled).
+// Missing files are harmless; with retry enabled, transient errors are
+// retried instead of silently leaving an orphaned image.
+exports.cleanupDeletedAnnouncementImage = onDocumentDeleted({
+  document: "announcements/{announcementId}",
+  region: "me-west1", // Same region as this project's Firestore database.
+  retry: true,
+  maxInstances: 3,
+}, async (event) => {
+  const id = event.params.announcementId;
+  const path = event.data?.get("imagePath");
+  if (typeof path !== "string" ||
+      !path.startsWith(`announcements/${id}/images/`)) {
+    return;
+  }
+  try {
+    await getStorage().bucket("masjid-khalid-app.firebasestorage.app")
+        .file(path).delete({ignoreNotFound: true});
+  } catch (error) {
+    logger.error("Failed to delete announcement image", {
+      announcementId: id,
+      code: error.code || "unknown",
+    });
+    throw error;
   }
 });
