@@ -248,6 +248,26 @@ async function sendDecision(db, courseId, registrationId, registration) {
   }
 }
 
+/** Once a late/rotated token becomes available, recover an unsent decision.
+ * The transaction prevents concurrent sync calls from duplicating the send.
+ * FCM remains best-effort; its acknowledgement is not device delivery proof.
+ */
+async function recoverCourseDecision(db, ref, fcmToken) {
+  const registration = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get("fcmToken") !== fcmToken ||
+        !["accepted", "rejected"].includes(snap.get("status")) ||
+        !["no-token", "failed"].includes(snap.get("notificationState")) ||
+        snap.get("decidedBy") === "automatic") {
+      return null;
+    }
+    tx.update(ref, {notificationState: "sending"});
+    return snap.data();
+  });
+  if (!registration) return false;
+  return sendDecision(db, registration.courseId, ref.id, registration);
+}
+
 /** Bind all course Cloud Functions to the existing admin checker and DB. */
 function makeCourseFunctions({db, requireAdmin}) {
   return {
@@ -510,7 +530,17 @@ function makeCourseFunctions({db, requireAdmin}) {
             }
           }
           if (updated > 0) await batch.commit();
-          return {updated};
+          // A decision could have been made before APNs/FCM returned a token.
+          // Recover it on the next token sync without requiring an admin resend.
+          let recovered = 0;
+          for (const item of snapshots.docs) {
+            if (!["no-token", "failed"].includes(
+                item.get("notificationState"))) continue;
+            if (await recoverCourseDecision(db, item.ref, fcmToken)) {
+              recovered++;
+            }
+          }
+          return {updated, recovered};
         }),
 
     // The unguessable per-installation key grants the registering device

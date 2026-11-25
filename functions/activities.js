@@ -156,6 +156,24 @@ async function notify(db, id, registrationId, registration) {
   }
 }
 
+// Recover an approval/rejection made while this installation had no FCM token.
+// Claim once transactionally before sending to avoid races between sync calls.
+async function recoverActivityDecision(db, ref, token) {
+  const registration = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get("fcmToken") !== token ||
+        !["accepted", "rejected"].includes(snap.get("status")) ||
+        !["no-token", "failed"].includes(snap.get("notificationState")) ||
+        snap.get("decidedBy") === "automatic") {
+      return null;
+    }
+    tx.update(ref, {notificationState: "sending"});
+    return snap.data();
+  });
+  if (!registration) return false;
+  return notify(db, registration.activityId, ref.id, registration);
+}
+
 async function rateLimit(db, req, credentialHash) {
   const ip = req.rawRequest?.ip;
   if (typeof ip !== "string" || ip.length < 2) {
@@ -402,7 +420,15 @@ function makeActivityFunctions({db, requireAdmin}) {
             }
           }
           if (count) await batch.commit();
-          return {updated: count};
+          let recovered = 0;
+          for (const doc of snap.docs) {
+            if (!["no-token", "failed"].includes(
+                doc.get("notificationState"))) continue;
+            if (await recoverActivityDecision(db, doc.ref, token)) {
+              recovered++;
+            }
+          }
+          return {updated: count, recovered};
         }),
     resendActivityDecision: onCall({region: "us-central1", maxInstances: 10},
         async (req) => {

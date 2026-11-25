@@ -68,6 +68,26 @@ function messageFor(kind, data, itemId) {
   };
 }
 
+// Retry only known temporary FCM errors. FCM may still deliver duplicates after
+// an ambiguous network failure; its API cannot promise exactly-once delivery.
+const transientCodes = new Set([
+  "messaging/server-unavailable", "messaging/internal-error",
+  "messaging/unknown-error", "unavailable", "deadline-exceeded",
+]);
+
+async function sendWithTransientRetry(send, message) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await send(message);
+    } catch (error) {
+      const code = String(error.code || "");
+      if (!transientCodes.has(code) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve,
+          attempt === 0 ? 500 : 1500));
+    }
+  }
+}
+
 // A document gets only one publication alert, even if it is edited or hidden
 // and shown again. The ledger prevents repeated sends from duplicate events.
 // FCM is best-effort and does not guarantee exactly-once device delivery.
@@ -84,7 +104,8 @@ async function publishOnce(db, kind, itemId, data, send = (message) =>
   });
   if (!claimed) return false;
   try {
-    const id = await send(messageFor(kind, data, itemId));
+    const id = await sendWithTransientRetry(send,
+        messageFor(kind, data, itemId));
     await ledger.update({state: "sent", messageId: id,
       sentAt: FieldValue.serverTimestamp()});
     return true;
