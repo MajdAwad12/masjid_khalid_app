@@ -133,6 +133,8 @@ class PublicNotificationsService with widgets.WidgetsBindingObserver {
         _scheduleRetry();
         return false;
       }
+      // Keep the same token readiness check as private decision delivery.
+      // ignore: deprecated_member_use
       final token = await FirebaseMessaging.instance.getToken();
       if (token == null || token.isEmpty) {
         _scheduleRetry();

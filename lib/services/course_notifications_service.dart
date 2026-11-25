@@ -173,6 +173,8 @@ class CourseNotificationsService with widgets.WidgetsBindingObserver {
         return null;
       }
       if (!await waitForApnsToken(attempts: 6)) return null;
+      // Existing registration records and Admin SDK sends use FCM tokens.
+      // ignore: deprecated_member_use
       return await FirebaseMessaging.instance.getToken();
     } catch (_) {
       return null;

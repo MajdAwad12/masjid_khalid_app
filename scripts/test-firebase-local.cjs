@@ -89,6 +89,19 @@ async function main() {
     check((await db.collection('users').doc(uid).get()).data()?.role==='disabled','deactivated admin profile is disabled');
     check((await listUsers(secondToken)).status>=400,'stale token cannot list users after role revocation');
     check((await listUsers(token)).status===200,'remaining admin retains access');
+    const recovery = db.collection('security_admin_recovery_emails').doc(admin.uid);
+    const owner = db.collection('security_admin_recovery_email_owners').doc(stamp);
+    await recovery.set({email: baseEmail});
+    await owner.set({uid: admin.uid});
+    const deletion = await call('deleteOwnAdminAccount', {}, token);
+    check(deletion.status === 200, 'administrator requests their own erasure');
+    check(!(await db.collection('users').doc(admin.uid).get()).exists, 'access removed immediately');
+    for (let attempt = 0; attempt < 60 && (await owner.get()).exists; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    check(!(await owner.get()).exists && !(await recovery.get()).exists, 'recovery data erased');
+    await assert.rejects(auth.getUser(admin.uid), {code:'auth/user-not-found'});
+    check((await auth.getUser(uid)).disabled, 'another account survives erasure');
     console.log('ALL CURRENT ADMIN EMULATOR TESTS PASSED');
   } finally {
     for (const uid of created) {

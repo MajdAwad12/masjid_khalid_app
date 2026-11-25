@@ -50,6 +50,7 @@ app.*.map.json
 *.keystore
 *.p12
 *.p8
+/store-config.json
 
 # Widget Preview related
 .widget_preview/

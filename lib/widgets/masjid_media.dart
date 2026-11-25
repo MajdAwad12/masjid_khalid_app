@@ -19,6 +19,7 @@ class MosqueMedia {
   static Future<MosqueImageDraft?> chooseImage() async {
     final selected = await ImagePicker().pickImage(
       source: ImageSource.gallery,
+      requestFullMetadata: false,
       maxWidth: 1600,
       imageQuality: 85,
     );

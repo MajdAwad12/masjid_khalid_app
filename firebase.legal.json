@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "target": "legal",
+    "public": "build/store-site",
+    "cleanUrls": true,
+    "ignore": [
+      "**/.*"
+    ],
+    "predeploy": [
+      "node scripts/prepare-store-site.cjs"
+    ]
+  }
+}

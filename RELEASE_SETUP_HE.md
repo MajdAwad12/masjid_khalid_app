@@ -1,5 +1,7 @@
 # מדריך הכנה לפרסום — 25.11.2026
 
+להפצה עם OTA, ל־Open Testing ול־TestFlight יש להשתמש במדריך [PRODUCTION.MD](PRODUCTION.MD). הפקודה הוותיקה `prepare-android-release.ps1` בהמשך בונה חבילה רגילה ללא Shorebird.
+
 ## שינויים בחבילת התיקונים
 
 - Android Release אינו משתמש עוד ב־Debug signing. נוספה תצורה ל־`android/key.properties` מקומי (הקובץ הסודי עצמו לא נכלל).

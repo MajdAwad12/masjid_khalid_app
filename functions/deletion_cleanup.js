@@ -1,11 +1,9 @@
 "use strict";
 
-// A Firestore deletion trigger runs this cleanup with retries enabled.
-// Registration documents live in separate top-level collections, so deleting
-// a course/activity document does not automatically delete them.
-async function deleteLinkedRegistrations(db, collection, parentField, id) {
+// Registration documents live outside the deleted parent document.
+const deleteLinkedRegistrations = async (db, collection, parentField, id) => {
   let deleted = 0;
-  while (true) {
+  for (;;) {
     const page = await db.collection(collection)
         .where(parentField, "==", id).limit(200).get();
     if (page.empty) return deleted;
@@ -14,6 +12,6 @@ async function deleteLinkedRegistrations(db, collection, parentField, id) {
     await batch.commit();
     deleted += page.size;
   }
-}
+};
 
 module.exports = {deleteLinkedRegistrations};

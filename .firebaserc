@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "masjid-khalid-app"
-  }
+  },
+  "targets": {
+    "masjid-khalid-app": {
+      "hosting": {
+        "legal": [
+          "masjid-khalid-legal"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

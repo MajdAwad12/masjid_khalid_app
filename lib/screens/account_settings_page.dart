@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:url_launcher/url_launcher.dart';
+
+import 'legal_page.dart';
+import 'delete_account_dialog.dart';
 
 import '../auth/auth_service.dart';
 import '../services/theme_controller.dart';
@@ -45,21 +47,6 @@ class AccountSettingsPage extends StatelessWidget {
     if (updated == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تغيير كلمة المرور بنجاح')),
-      );
-    }
-  }
-
-  Future<void> _openPrivacyPolicy(BuildContext context) async {
-    final url = Uri.tryParse(privacyUrl);
-    if (url == null || url.scheme != 'https' || url.host.isEmpty) return;
-    try {
-      if (await launchUrl(url, mode: LaunchMode.externalApplication)) return;
-    } catch (_) {
-      // External browser may be unavailable; explain instead of crashing.
-    }
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح سياسة الخصوصية الآن')),
       );
     }
   }
@@ -119,17 +106,27 @@ class AccountSettingsPage extends StatelessWidget {
                 ),
               ),
             ),
-            if (Uri.tryParse(privacyUrl)?.scheme == 'https') ...[
+            for (final privacy in [true, false]) ...[
               const SizedBox(height: 12),
               MosqueCardShell(
                 accent: MosquePalette.amber,
                 child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: const Icon(Icons.privacy_tip_outlined),
-                  title: const Text('سياسة الخصوصية'),
-                  subtitle: const Text('كيفية استخدام المعلومات وطلب حذفها'),
-                  trailing: const Icon(Icons.open_in_new),
-                  onTap: () => _openPrivacyPolicy(context),
+                  leading: Icon(
+                    privacy
+                        ? Icons.privacy_tip_outlined
+                        : Icons.description_outlined,
+                  ),
+                  title: Text(privacy ? 'سياسة الخصوصية' : 'شروط الاستخدام'),
+                  trailing: const Icon(Icons.chevron_left),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => LegalPage(
+                        privacy: privacy,
+                        contact: '$managerName · $managerPhone',
+                        webUrl: privacy ? privacyUrl : '',
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -174,6 +171,15 @@ class AccountSettingsPage extends StatelessWidget {
               const _SettingsHeading('إدارة النظام', Icons.shield_outlined),
               const SizedBox(height: 10),
               const AdminRecoveryEmailCard(),
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('حذف حسابي نهائياً'),
+                onTap: () => showDialog<void>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const DeleteAccountDialog(),
+                ),
+              ),
               const SizedBox(height: 12),
               MosqueCardShell(
                 accent: MosquePalette.ocean,

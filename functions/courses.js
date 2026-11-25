@@ -531,7 +531,7 @@ function makeCourseFunctions({db, requireAdmin}) {
           }
           if (updated > 0) await batch.commit();
           // A decision could have been made before APNs/FCM returned a token.
-          // Recover it on the next token sync without requiring an admin resend.
+          // Recover it on the next token sync without an admin resend.
           let recovered = 0;
           for (const item of snapshots.docs) {
             if (!["no-token", "failed"].includes(

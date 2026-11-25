@@ -7,7 +7,9 @@ const {initializeApp} = require("firebase-admin/app");
 const {getAuth} = require("firebase-admin/auth");
 const {getStorage} = require("firebase-admin/storage");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
+const {
+  onDocumentCreated, onDocumentDeleted,
+} = require("firebase-functions/v2/firestore");
 const {
   getFirestore, FieldValue, Timestamp,
 } = require("firebase-admin/firestore");
@@ -705,6 +707,45 @@ const passwordRecoveryIpLimits = db.collection(
     "security_admin_password_recovery_ip_limits");
 const passwordRecoveryLifetimeMs = 15 * 60 * 1000;
 const passwordRecoveryCooldownMs = 10 * 60 * 1000;
+// Remove access and durably schedule erasure together. Only the caller's
+// verified UID can select an account. The queue has no client access.
+const deletionQueue = db.collection("security_account_deletions");
+exports.deleteOwnAdminAccount = onCall({
+  region: "us-central1", invoker: "public",
+}, async (req) => {
+  const uid = await requireRecentAdmin(req);
+  const batch = db.batch();
+  batch.delete(db.collection("users").doc(uid));
+  batch.set(deletionQueue.doc(uid), {
+    requestedAt: FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
+  return {accepted: true};
+});
+
+exports.finishAccountDeletion = onDocumentCreated({
+  document: "security_account_deletions/{uid}", region: "us-central1",
+  retry: true,
+}, async (event) => {
+  const uid = event.params.uid;
+  try {
+    await auth.deleteUser(uid);
+  } catch (error) {
+    if (error.code !== "auth/user-not-found") throw error;
+  }
+  // An owner index is keyed by email hash. Only remove entries still
+  // owned by this UID, including when an event is delivered twice.
+  await db.runTransaction(async (tx) => {
+    const owners = await tx.get(recoveryOwners.where("uid", "==", uid));
+    for (const owner of owners.docs) tx.delete(owner.ref);
+    for (const records of [recoveryRecords, recoveryPending, recoveryLimits,
+      passwordRecoveryTokens, passwordRecoveryLimits,
+      db.collection("security_password_reset_limits")]) {
+      tx.delete(records.doc(uid));
+    }
+    tx.delete(deletionQueue.doc(uid));
+  });
+});
 const recoveryGenericResponse = {
   success: true,
   message: "If this is an active administrator with a verified " +

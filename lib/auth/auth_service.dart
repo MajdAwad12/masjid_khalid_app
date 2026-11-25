@@ -79,6 +79,21 @@ class AuthService {
     await user.updatePassword(newPassword);
   }
 
+  static Future<void> deleteOwnAccount(String password) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      throw StateError('يرجى تسجيل الدخول أولاً');
+    }
+    await user.reauthenticateWithCredential(
+      EmailAuthProvider.credential(email: user.email!, password: password),
+    );
+    await user.getIdToken(true);
+    await FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('deleteOwnAdminAccount')
+        .call<void>();
+    await _auth.signOut();
+  }
+
   static Future<void> signOut() => _auth.signOut();
 
   static String _cooldownMessage(int seconds) {

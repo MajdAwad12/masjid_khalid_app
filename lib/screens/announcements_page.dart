@@ -473,6 +473,7 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
     try {
       final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
+        requestFullMetadata: false,
         maxWidth: 1600,
         imageQuality: 85,
       );

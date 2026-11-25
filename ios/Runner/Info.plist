@@ -25,7 +25,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>تُستخدم مكتبة الصور لاختيار صورة لإعلانات المسجد بواسطة المسؤول.</string>
+	<string>يختار المسؤول صورة من المكتبة لنشرها مع أخبار المسجد أو أنشطته أو الوظائف البيتية.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
