@@ -44,5 +44,12 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Never publish upload keys, signing passwords, or local secrets.
+/android/key.properties
+*.jks
+*.keystore
+*.p12
+*.p8
+
 # Widget Preview related
 .widget_preview/

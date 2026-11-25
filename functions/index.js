@@ -23,7 +23,6 @@ const db = getFirestore();
 
 const gmailSenderEmail = defineSecret("GMAIL_SENDER_EMAIL");
 const gmailAppPassword = defineSecret("GMAIL_APP_PASSWORD");
-const resendTestEmail = defineSecret("RESEND_TEST_EMAIL");
 
 // Gmail SMTP transport. Keep credentials in Cloud Secret Manager, never in
 // Flutter, Firestore, logs, or version control. Requires a Gmail App Password.
@@ -454,50 +453,6 @@ exports.deactivateAdminAccount = onCall({
       });
     }
   }
-});
-
-// TEMPORARY DEVELOPMENT TEST. Remove this callable before production.
-// Only a signed-in, active admin can send to the fixed test mailbox.
-exports.sendRecoveryTestEmail = onCall({
-  region: "us-central1",
-  // IAM lets Firebase SDK requests through; requireAdmin checks identity.
-  invoker: "public",
-  secrets: [gmailSenderEmail, gmailAppPassword, resendTestEmail],
-}, async (request) => {
-  const adminUid = await requireAdmin(request);
-  const destination = resendTestEmail.value().trim();
-  if (!destination || !destination.includes("@")) {
-    throw new HttpsError("failed-precondition", "Missing test recipient.");
-  }
-
-  // One request per admin every two minutes. Only server code writes this.
-  const limitRef = db.collection("security_email_test_limits").doc(adminUid);
-  const nowMs = Date.now();
-  await db.runTransaction(async (transaction) => {
-    const previous = await transaction.get(limitRef);
-    const last = previous.data()?.lastAttemptAtMs;
-    if (typeof last === "number" && nowMs - last < 120000) {
-      throw new HttpsError("resource-exhausted", "Try again in two minutes.");
-    }
-    transaction.set(limitRef, {lastAttemptAtMs: nowMs});
-  });
-
-  try {
-    await sendGmail({
-      to: destination,
-      subject: "Masjid Khalid - Email Delivery Test",
-      text: "This is a test email from Firebase Cloud Functions. " +
-        "No password has been changed.",
-    });
-  } catch (error) {
-    logger.error("Gmail SMTP test email failed", {
-      adminUid: adminUid,
-      code: error.code || "unknown",
-    });
-    throw new HttpsError("unavailable", "Test email could not be sent.");
-  }
-  logger.info("Gmail test email submitted", {adminUid: adminUid});
-  return {success: true};
 });
 
 // --- Personal recovery-email enrollment (not password reset) ---

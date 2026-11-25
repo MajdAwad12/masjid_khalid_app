@@ -37,6 +37,11 @@ class CoursesService {
         as String;
   }
 
+  // Admin-only. Registration cleanup runs through a retryable server trigger.
+  static Future<void> deleteCourse(String courseId) async {
+    await _functions.httpsCallable('deleteCourse').call({'courseId': courseId});
+  }
+
   // Admin-only, idempotent one-time upgrade for legacy course documents.
   static Future<int> initializeCourseVisibility() async {
     final response = await _functions

@@ -1,0 +1,7 @@
+# EXAMPLE ONLY. Copy to android/key.properties and insert your OWN secure values.
+# On Windows use a double-backslash path (Java properties), or forward slashes.
+# Example: storeFile=C:/Users/YOUR_USER/upload-keystore.jks
+storePassword=REPLACE_ME
+keyPassword=REPLACE_ME
+keyAlias=upload
+storeFile=C:/Users/YOUR_USER/upload-keystore.jks

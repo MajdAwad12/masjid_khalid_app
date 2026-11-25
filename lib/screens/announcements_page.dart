@@ -234,47 +234,13 @@ class AnnouncementCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                if (isImportant || isAdmin) ...[
-                  Row(
-                    textDirection: TextDirection.rtl,
-                    children: [
-                      if (isImportant)
-                        MosqueTag(
-                          text: 'إعلان مهم',
-                          color: isDark
-                              ? const Color(0xFFFFD700)
-                              : MosquePalette.amber,
-                          icon: Icons.star_outline_rounded,
-                        ),
-                      if (isAdmin) ...[
-                        const Spacer(),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'تعديل الإعلان',
-                              onPressed: onEdit,
-                              icon: const Icon(Icons.edit_outlined, size: 21),
-                              color: MosquePalette.amber,
-                            ),
-                            IconButton(
-                              tooltip: 'حذف الإعلان',
-                              onPressed: onDelete,
-                              icon: isDeleting
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.delete_outline, size: 21),
-                              color: scheme.error,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
+                if (isImportant) ...[
+                  MosqueTag(
+                    text: 'إعلان مهم',
+                    color: isDark
+                        ? const Color(0xFFFFD700)
+                        : MosquePalette.amber,
+                    icon: Icons.star_outline_rounded,
                   ),
                   const SizedBox(height: 14),
                 ],
@@ -387,6 +353,34 @@ class AnnouncementCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ),
+                ],
+                if (isAdmin) ...[
+                  const SizedBox(height: 12),
+                  Divider(color: scheme.outlineVariant),
+                  const SizedBox(height: 9),
+                  Wrap(
+                    textDirection: TextDirection.rtl,
+                    spacing: 9,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('تعديل'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onDelete,
+                        icon: isDeleting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.delete_outline),
+                        label: const Text('حذف'),
+                      ),
+                    ],
                   ),
                 ],
                   ],

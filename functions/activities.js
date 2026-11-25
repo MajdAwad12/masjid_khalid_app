@@ -5,6 +5,9 @@
 // only its own registrations are accessible with the installation secret.
 const crypto = require("node:crypto");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
+const {getStorage} = require("firebase-admin/storage");
+const {deleteLinkedRegistrations} = require("./deletion_cleanup");
 const {FieldValue, Timestamp} = require("firebase-admin/firestore");
 const {getMessaging} = require("firebase-admin/messaging");
 const logger = require("firebase-functions/logger");
@@ -203,6 +206,46 @@ function makeActivityFunctions({db, requireAdmin}) {
           });
           return {activityId: id};
         }),
+    // Deleting the parent document makes enrollment impossible immediately.
+    // The deletion trigger below cleans up the separately stored registrations
+    // and the image after the card disappears from users' screens.
+    deleteActivity: onCall({region: "us-central1", maxInstances: 10},
+        async (req) => {
+          await requireAdmin(req);
+          const id = requireId(req.data?.activityId);
+          const ref = activities.doc(id);
+          await db.runTransaction(async (tx) => {
+            const activity = await tx.get(ref);
+            if (!activity.exists) {
+              throw new HttpsError("not-found", "Activity not found.");
+            }
+            tx.delete(ref);
+          });
+          return {deleted: true};
+        }),
+
+    // Idempotent and retryable even if registration cleanup or Storage fails.
+    cleanupDeletedActivityAssets: onDocumentDeleted({
+      document: "activities/{activityId}",
+      region: "me-west1",
+      retry: true,
+      maxInstances: 3,
+    }, async (event) => {
+      const id = event.params.activityId;
+      const removed = await deleteLinkedRegistrations(db,
+          "activity_registrations", "activityId", id);
+      const path = event.data?.get("imagePath");
+      const ownedPrefix = `activities/${id}/images/`;
+      const filename = typeof path === "string" &&
+          path.startsWith(ownedPrefix) ? path.substring(ownedPrefix.length) :
+          "";
+      if (/^[a-zA-Z0-9_-]{8,90}\.(jpg|png|webp)$/.test(filename)) {
+        await getStorage().bucket("masjid-khalid-app.firebasestorage.app")
+            .file(path).delete({ignoreNotFound: true});
+      }
+      logger.info("Deleted activity assets", {activityId: id, removed});
+    }),
+
     registerForActivity: onCall({region: "us-central1", maxInstances: 10},
         async (req) => {
           const d = req.data || {};

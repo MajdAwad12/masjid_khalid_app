@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_service.dart';
 import '../services/theme_controller.dart';
@@ -14,12 +15,14 @@ class AccountSettingsPage extends StatelessWidget {
   final bool isAdmin;
   final String managerName;
   final String managerPhone;
+  final String privacyUrl;
 
   const AccountSettingsPage({
     super.key,
     required this.isAdmin,
     required this.managerName,
     required this.managerPhone,
+    this.privacyUrl = '',
   });
 
   Future<void> _signOut(BuildContext context) async {
@@ -42,6 +45,21 @@ class AccountSettingsPage extends StatelessWidget {
     if (updated == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تغيير كلمة المرور بنجاح')),
+      );
+    }
+  }
+
+  Future<void> _openPrivacyPolicy(BuildContext context) async {
+    final url = Uri.tryParse(privacyUrl);
+    if (url == null || url.scheme != 'https' || url.host.isEmpty) return;
+    try {
+      if (await launchUrl(url, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {
+      // External browser may be unavailable; explain instead of crashing.
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر فتح سياسة الخصوصية الآن')),
       );
     }
   }
@@ -101,6 +119,20 @@ class AccountSettingsPage extends StatelessWidget {
                 ),
               ),
             ),
+            if (Uri.tryParse(privacyUrl)?.scheme == 'https') ...[
+              const SizedBox(height: 12),
+              MosqueCardShell(
+                accent: MosquePalette.amber,
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: const Icon(Icons.privacy_tip_outlined),
+                  title: const Text('سياسة الخصوصية'),
+                  subtitle: const Text('كيفية استخدام المعلومات وطلب حذفها'),
+                  trailing: const Icon(Icons.open_in_new),
+                  onTap: () => _openPrivacyPolicy(context),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             const _SettingsHeading('المظهر', Icons.palette_outlined),
             const SizedBox(height: 10),

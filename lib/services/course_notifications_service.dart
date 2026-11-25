@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -8,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'courses_service.dart';
 import 'activities_service.dart';
+import 'apns_readiness.dart';
 
 // No Firebase Auth account is created for public users. Each installation has
 // a random private key only to update FCM delivery and check its own statuses.
@@ -104,10 +104,7 @@ class CourseNotificationsService {
 
   Future<String?> _safeCurrentToken() async {
     try {
-      if (Platform.isIOS || Platform.isMacOS) {
-        final apns = await FirebaseMessaging.instance.getAPNSToken();
-        if (apns == null) return null;
-      }
+      if (!await waitForApnsToken()) return null;
       // ignore: deprecated_member_use
       return await FirebaseMessaging.instance.getToken();
     } catch (_) {

@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'course_notifications_service.dart';
+import 'apns_readiness.dart';
 
 /// One public topic for new announcements, courses, activities and homework.
 /// It contains public content ONLY, and does not require a user account.
@@ -23,6 +23,7 @@ class PublicNotificationsService {
   StreamSubscription<RemoteMessage>? _openedSubscription;
   StreamSubscription<String>? _rotationSubscription;
   bool _started = false;
+  bool _topicSubscribed = false;
 
   Future<bool> enabled() async {
     final prefs = await SharedPreferences.getInstance();
@@ -84,10 +85,27 @@ class PublicNotificationsService {
   Future<void> _restoreTopic() async {
     if (!await enabled()) return;
     try {
-      if (Platform.isIOS || Platform.isMacOS) {
-        final apns = await FirebaseMessaging.instance.getAPNSToken();
-        if (apns == null) return; // Will retry on a later start/registration.
+      if (!await waitForApnsToken()) {
+        // A one-shot retry handles a slower initial APNs registration.
+        if (!_topicSubscribed) {
+          _topicSubscribed = true;
+          unawaited(Future<void>.delayed(
+            const Duration(seconds: 12),
+            () async {
+              _topicSubscribed = false;
+              if (!await enabled()) return;
+              try {
+                if (!await waitForApnsToken()) return;
+                if (await enabled()) {
+                  await FirebaseMessaging.instance.subscribeToTopic(topic);
+                }
+              } catch (_) {}
+            },
+          ));
+        }
+        return;
       }
+      if (!await enabled()) return;
       await FirebaseMessaging.instance.subscribeToTopic(topic);
     } catch (_) {
       // Retry on the next launch or refreshed registration.

@@ -23,6 +23,7 @@ class ActivitiesPage extends StatefulWidget {
 class _ActivitiesPageState extends State<ActivitiesPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
   Timer? _refreshTimer;
+  String? _deletingId;
 
   @override
   void initState() {
@@ -54,6 +55,41 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
     );
     if (!mounted || result != true) return;
     _notice(item == null ? 'تم نشر النشاط بنجاح 🌿' : 'تم حفظ التعديلات بنجاح');
+  }
+
+  Future<void> _deleteActivity(ActivityItem item) async {
+    if (_deletingId != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف النشاط أو الرحلة'),
+        content: Text(
+          'هل تريد حذف «${item.title}» نهائيًا؟ '
+          'سيتم حذف جميع تسجيلات المشاركين والصورة المرتبطة بها أيضًا، '
+          'ولا يمكن التراجع عن الحذف.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingId = item.id);
+    try {
+      await ActivitiesService.deleteActivity(item.id);
+      _notice('تم حذف النشاط أو الرحلة بنجاح');
+    } catch (error) {
+      _notice('تعذر الحذف: ${ActivitiesService.error(error)}');
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
+    }
   }
 
   Future<void> _register(ActivityItem item) async {
@@ -147,14 +183,19 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
                       child: _ActivityCard(
                         item: a,
                         isAdmin: widget.isAdmin,
-                        onEdit: () => _edit(a),
+                        onEdit: _deletingId == null ? () => _edit(a) : null,
+                        onDelete: _deletingId == null
+                            ? () => _deleteActivity(a)
+                            : null,
+                        isDeleting: _deletingId == a.id,
                         onRegister: () => _register(a),
-                        onRegistrations: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                ActivityRegistrationsPage(activity: a),
-                          ),
-                        ),
+                        onRegistrations: _deletingId == null
+                            ? () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ActivityRegistrationsPage(activity: a),
+                                ),
+                              )
+                            : null,
                       ),
                     ),
                   ),
@@ -187,15 +228,19 @@ class _ActivitiesMessage extends StatelessWidget {
 class _ActivityCard extends StatelessWidget {
   final ActivityItem item;
   final bool isAdmin;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
   final VoidCallback onRegister;
-  final VoidCallback onRegistrations;
+  final VoidCallback? onRegistrations;
+  final bool isDeleting;
   const _ActivityCard({
     required this.item,
     required this.isAdmin,
     required this.onEdit,
+    required this.onDelete,
     required this.onRegister,
     required this.onRegistrations,
+    required this.isDeleting,
   });
 
   @override
@@ -391,19 +436,35 @@ class _ActivityCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 13),
-                  Wrap(
-                    spacing: 9,
-                    runSpacing: 8,
+                  Row(
+                    textDirection: TextDirection.rtl,
                     children: [
-                      OutlinedButton.icon(
-                        onPressed: onEdit,
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('تعديل'),
+                      Expanded(
+                        flex: 3,
+                        child: _ActivityAdminAction(
+                          onPressed: onEdit,
+                          icon: Icons.edit_outlined,
+                          label: 'تعديل',
+                        ),
                       ),
-                      OutlinedButton.icon(
-                        onPressed: onRegistrations,
-                        icon: const Icon(Icons.people_outline),
-                        label: const Text('إدارة المسجلين'),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        flex: 5,
+                        child: _ActivityAdminAction(
+                          onPressed: onRegistrations,
+                          icon: Icons.people_outline,
+                          label: 'إدارة المسجلين',
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        flex: 3,
+                        child: _ActivityAdminAction(
+                          onPressed: onDelete,
+                          icon: Icons.delete_outline,
+                          label: 'حذف',
+                          isLoading: isDeleting,
+                        ),
                       ),
                     ],
                   ),
@@ -435,6 +496,59 @@ class _ActivityCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+// Keeps the three admin actions on one line, even on narrow phones.
+class _ActivityAdminAction extends StatelessWidget {
+  const _ActivityAdminAction({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    this.isLoading = false,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String label;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        minimumSize: const Size(0, 44),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Row(
+        textDirection: TextDirection.rtl,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (isLoading)
+            const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Icon(icon, size: 16),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+        ],
       ),
     );
   }

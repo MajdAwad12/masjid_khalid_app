@@ -61,8 +61,15 @@ Future<void> main() async {
 }
 
 // Replace with verified mosque contact information.
-const String supportManagerName = 'يُضاف اسم المسؤول لاحقًا';
-const String supportManagerPhone = 'يُضاف رقم الهاتف لاحقًا';
+const String supportManagerName = String.fromEnvironment(
+  'SUPPORT_MANAGER_NAME',
+  defaultValue: 'يُضاف اسم المسؤول لاحقًا',
+);
+const String supportManagerPhone = String.fromEnvironment(
+  'SUPPORT_MANAGER_PHONE',
+  defaultValue: 'يُضاف رقم الهاتف لاحقًا',
+);
+const String privacyPolicyUrl = String.fromEnvironment('PRIVACY_POLICY_URL');
 
 // Application entry point.
 class MasjidApp extends StatelessWidget {
@@ -76,6 +83,9 @@ class MasjidApp extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'مسجد خالد بن الوليد',
+          locale: const Locale('ar'),
+          supportedLocales: const [Locale('ar')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
           scaffoldMessengerKey: courseMessengerKey,
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
@@ -144,6 +154,7 @@ class _MainScreenState extends State<MainScreen> {
         isAdmin: widget.isAdmin,
         managerName: supportManagerName,
         managerPhone: supportManagerPhone,
+        privacyUrl: privacyPolicyUrl,
       ),
     ];
 

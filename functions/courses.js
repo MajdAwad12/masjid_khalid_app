@@ -7,6 +7,8 @@
 // against BOTH Firebase custom claims and the admin profile in index.js.
 const crypto = require("node:crypto");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
+const {deleteLinkedRegistrations} = require("./deletion_cleanup");
 const {FieldValue, Timestamp} = require("firebase-admin/firestore");
 const {getMessaging} = require("firebase-admin/messaging");
 const logger = require("firebase-functions/logger");
@@ -322,6 +324,38 @@ function makeCourseFunctions({db, requireAdmin}) {
           });
           return {courseId: ref.id};
         }),
+
+    // Only admins may permanently remove a course. A transaction ensures
+    // concurrent enrollment requests cannot create new registrations after
+    // deletion. A retryable Firestore trigger removes existing registrations.
+    deleteCourse: onCall({region: "us-central1", maxInstances: 10},
+        async (request) => {
+          await requireAdmin(request);
+          const courseId = requireCourseId(request.data?.courseId);
+          const ref = db.collection("courses").doc(courseId);
+          await db.runTransaction(async (tx) => {
+            const course = await tx.get(ref);
+            if (!course.exists) {
+              throw new HttpsError("not-found", "Course not found.");
+            }
+            tx.delete(ref);
+          });
+          return {deleted: true};
+        }),
+
+    // Retried automatically if Firestore cleanup fails midway. No client is
+    // allowed to delete registration documents directly.
+    cleanupDeletedCourseRegistrations: onDocumentDeleted({
+      document: "courses/{courseId}",
+      region: "me-west1",
+      retry: true,
+      maxInstances: 3,
+    }, async (event) => {
+      const courseId = event.params.courseId;
+      const removed = await deleteLinkedRegistrations(db,
+          "course_registrations", "courseId", courseId);
+      logger.info("Deleted course registrations", {courseId, removed});
+    }),
 
     // A phone number may be shared by family members. Deduplicate by
     // course + normalized phone + participant name, without losing legacy

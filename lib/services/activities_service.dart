@@ -44,6 +44,13 @@ class ActivitiesService {
     });
   }
 
+  // Admin-only. The server removes registrations and the stored image.
+  static Future<void> deleteActivity(String activityId) async {
+    await _functions.httpsCallable('deleteActivity').call({
+      'activityId': activityId,
+    });
+  }
+
   static Future<String> register({
     required String activityId,
     required String fullName,

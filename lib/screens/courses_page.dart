@@ -25,6 +25,7 @@ class CoursesPage extends StatefulWidget {
 class _CoursesPageState extends State<CoursesPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
   Timer? _clockRefresh;
+  String? _deletingId;
 
   @override
   void initState() {
@@ -77,6 +78,41 @@ class _CoursesPageState extends State<CoursesPage> {
     );
     if (saved == true) {
       _notice(course == null ? 'تم نشر الدورة بنجاح' : 'تم تعديل الدورة بنجاح');
+    }
+  }
+
+  Future<void> _deleteCourse(Course course) async {
+    if (_deletingId != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف الدورة'),
+        content: Text(
+          'هل تريد حذف «${course.title}» نهائيًا؟ '
+          'سيتم حذف جميع تسجيلات المشاركين المرتبطة بها أيضًا، '
+          'ولا يمكن التراجع عن الحذف.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingId = course.id);
+    try {
+      await CoursesService.deleteCourse(course.id);
+      _notice('تم حذف الدورة بنجاح');
+    } catch (error) {
+      _notice('تعذر حذف الدورة: ${CoursesService.errorMessage(error)}');
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
     }
   }
 
@@ -167,13 +203,20 @@ class _CoursesPageState extends State<CoursesPage> {
                         course: course,
                         isAdmin: widget.isAdmin,
                         onRegister: () => _register(course),
-                        onEdit: () => _openEditor(course),
-                        onRegistrations: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                CourseRegistrationsPage(course: course),
-                          ),
-                        ),
+                        onEdit: _deletingId == null
+                            ? () => _openEditor(course)
+                            : null,
+                        onDelete: _deletingId == null
+                            ? () => _deleteCourse(course)
+                            : null,
+                        isDeleting: _deletingId == course.id,
+                        onRegistrations: _deletingId == null
+                            ? () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => CourseRegistrationsPage(course: course),
+                                ),
+                              )
+                            : null,
                       ),
                     ),
                   ),
@@ -217,15 +260,19 @@ class _CourseCard extends StatelessWidget {
   final Course course;
   final bool isAdmin;
   final VoidCallback onRegister;
-  final VoidCallback onEdit;
-  final VoidCallback onRegistrations;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onRegistrations;
+  final bool isDeleting;
 
   const _CourseCard({
     required this.course,
     required this.isAdmin,
     required this.onRegister,
     required this.onEdit,
+    required this.onDelete,
     required this.onRegistrations,
+    required this.isDeleting,
   });
 
   @override
@@ -381,19 +428,35 @@ class _CourseCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 9,
+                  Row(
+                    textDirection: TextDirection.rtl,
                     children: [
-                      OutlinedButton.icon(
-                        onPressed: onEdit,
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('تعديل'),
+                      Expanded(
+                        flex: 3,
+                        child: _CourseAdminAction(
+                          onPressed: onEdit,
+                          icon: Icons.edit_outlined,
+                          label: 'تعديل',
+                        ),
                       ),
-                      OutlinedButton.icon(
-                        onPressed: onRegistrations,
-                        icon: const Icon(Icons.people_outline),
-                        label: const Text('إدارة المسجلين'),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        flex: 5,
+                        child: _CourseAdminAction(
+                          onPressed: onRegistrations,
+                          icon: Icons.people_outline,
+                          label: 'إدارة المسجلين',
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        flex: 3,
+                        child: _CourseAdminAction(
+                          onPressed: onDelete,
+                          icon: Icons.delete_outline,
+                          label: 'حذف',
+                          isLoading: isDeleting,
+                        ),
                       ),
                     ],
                   ),
@@ -445,6 +508,58 @@ class _CourseCard extends StatelessWidget {
                 height: 1.5,
                 color: scheme.onSurfaceVariant,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Keeps the three course admin actions on one line on narrow phones.
+class _CourseAdminAction extends StatelessWidget {
+  const _CourseAdminAction({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+    this.isLoading = false,
+  });
+
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String label;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        minimumSize: const Size(0, 44),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Row(
+        textDirection: TextDirection.rtl,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (isLoading)
+            const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Icon(icon, size: 16),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11),
             ),
           ),
         ],
