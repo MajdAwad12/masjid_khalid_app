@@ -1,0 +1,38 @@
+# Unsigned iOS build for the mosque Flutter app.
+# This is a compilation/packaging check only; it is NOT an App Store IPA.
+workflows:
+  ios-unsigned-ipa:
+    name: Mosque iOS unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      flutter: '3.50.0'
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Verify build tools
+        script: |
+          flutter --version
+          xcodebuild -version
+      - name: Restore locked Flutter dependencies
+        script: flutter pub get --enforce-lockfile
+      - name: Install iOS dependencies
+        script: |
+          cd ios
+          pod install
+      - name: Build unsigned iOS app (release)
+        script: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        script: |
+          set -eu
+          test -d build/ios/iphoneos/Runner.app
+          mkdir -p build/ios/ipa_unsigned
+          tempdir="$(mktemp -d)"
+          mkdir -p "$tempdir/Payload"
+          cp -R build/ios/iphoneos/Runner.app "$tempdir/Payload/Runner.app"
+          (cd "$tempdir" && zip -qry "$CM_BUILD_DIR/build/ios/ipa_unsigned/masjid_khalid_unsigned.ipa" Payload)
+          unzip -t build/ios/ipa_unsigned/masjid_khalid_unsigned.ipa
+          ls -lh build/ios/ipa_unsigned/masjid_khalid_unsigned.ipa
+    artifacts:
+      - build/ios/ipa_unsigned/*.ipa
+      - /tmp/xcodebuild_logs/*.log
