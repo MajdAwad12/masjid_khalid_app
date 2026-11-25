@@ -1,3 +1,5 @@
+import '../widgets/registration_privacy_actions.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../models/course.dart';
@@ -59,14 +61,14 @@ class _CourseRegistrationDialogState extends State<CourseRegistrationDialog> {
         if (!mounted || continueWithoutPush != true) return;
       }
       final key = await notifications.deviceKey();
-      final status = await CoursesService.register(
+      await CoursesService.register(
         courseId: widget.course.id,
         fullName: _name.text,
         phone: _phone.text,
         deviceKey: key,
         fcmToken: token,
       );
-      if (mounted) Navigator.pop(context, status);
+      if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -100,6 +102,7 @@ class _CourseRegistrationDialogState extends State<CourseRegistrationDialog> {
                   'لا تحتاج إلى حساب. أدخل اسمك ورقم هاتفك الصحيح للتسجيل.',
                 ),
                 const SizedBox(height: 16),
+                const Text(guardianNotice),
                 TextFormField(
                   controller: _name,
                   textCapitalization: TextCapitalization.words,

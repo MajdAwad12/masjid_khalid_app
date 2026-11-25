@@ -4,8 +4,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// Always renders the public application. Admin privileges are granted only
-/// after Firebase Custom Claims and the Firestore profile both verify them.
+bool serverConfirmedStaffData({
+  required bool fromCache,
+  required bool pendingWrites,
+}) => !fromCache && !pendingWrites;
+
+/// Keeps privileged content closed until Auth and the live profile agree.
 class AuthGate extends StatefulWidget {
   final Widget Function(bool isAdmin) appBuilder;
 
@@ -53,7 +57,7 @@ class _AuthGateState extends State<AuthGate> {
       _profileSubscription = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .snapshots()
+          .snapshots(includeMetadataChanges: true)
           .listen(
             (snapshot) {
               if (!mounted ||
@@ -61,7 +65,12 @@ class _AuthGateState extends State<AuthGate> {
                   FirebaseAuth.instance.currentUser?.uid != user.uid) {
                 return;
               }
-              final allowed = snapshot.data()?['role'] == 'admin';
+              final allowed =
+                  serverConfirmedStaffData(
+                    fromCache: snapshot.metadata.isFromCache,
+                    pendingWrites: snapshot.metadata.hasPendingWrites,
+                  ) &&
+                  snapshot.data()?['role'] == 'admin';
               if (_isAdmin != allowed) {
                 setState(() => _isAdmin = allowed);
               }

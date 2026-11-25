@@ -4,6 +4,8 @@
 
 [iPhone screenshots](app-store/iphone/) · [iPad screenshots](app-store/ipad-13/) · [App Store icon](app-store/icon-1024.png) · [TestFlight](#8-testflight-distribution) · [Production](#9-production-app-review-and-public-release)
 
+See [registration privacy and release checks](REGISTRATION-PRIVACY.md) for the staff verification flow, individual erasure, retention decisions, and release evidence.
+
 ## 1. Confirm the release inputs
 
 Run terminal commands from the repository root. Use Flutter 3.50.0 / Dart 3.14, Node.js 24 and the committed dependency lock files. The current app version is `1.0.0+1`. Check the store history first. Set the marketing version and the next unused, increasing build number in `pubspec.yaml` **before** building. Keep the tested binary, source revision and exact build configuration together.
@@ -47,7 +49,7 @@ node scripts/verify-store-assets.cjs
 firebase emulators:exec --only auth,functions,firestore --project masjid-khalid-app "node scripts/test-firebase-local.cjs"
 ~~~
 
-The last command writes disposable local emulator data. Before making the app available, verify the deployed Firestore/Storage rules, services, IAM, billing, Gmail SMTP secrets, event triggers and scheduled jobs. Test real registration, status on the originating device, denied notifications, staff image upload, recovery and account erasure with designated test data. Check that hidden entries and private registrations are protected, including existing media download links. Staff self-deletion requires the two new Functions. After checking the target project, deploy the worker first, then the public callable. Confirm the worker completes, removes Auth and recovery records, and leaves other accounts intact. Monitor failed events and outstanding `security_account_deletions` documents.
+The last command writes disposable local emulator data. Before making the app available, verify the deployed Firestore/Storage rules, services, IAM, billing, Gmail SMTP secrets, event triggers and scheduled jobs. Test real registration, status on the staff-verified originating installation, denied notifications, staff image upload, recovery and account erasure with designated test data. Check that hidden entries and private registrations are protected, including existing media download links. Staff self-deletion requires the two new Functions. After checking the target project, deploy the worker first, then the public callable. Confirm the worker completes, removes Auth and recovery records, and leaves other accounts intact. Monitor failed events and outstanding `security_account_deletions` documents.
 
 ~~~bash
 firebase deploy --only functions:finishAccountDeletion --project masjid-khalid-app --force
@@ -77,7 +79,7 @@ Install fastlane on the build/upload host and run `fastlane --version`. A mainta
 1. On a Mac install Xcode 26 or later with an iOS 26 or later SDK and command-line tools. Accept the Xcode license, complete first launch and enroll the correct legal entity in the Apple Developer Program. The account holder accepts pending agreements. Configure EU trader status and business/contact verification where applicable. [Apple SDK deadlines](https://developer.apple.com/news/upcoming-requirements/) · [App Store Connect workflow](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-workflow/)
 2. In Certificates, Identifiers & Profiles, register or select the explicit App ID `com.masjidkhalidbinwaleed.masjidKhalidApp`. Enable Push Notifications. Prepare Apple Distribution signing and an App Store Connect distribution provisioning profile, or use automatic signing. The Runner target supports iPhone **and iPad**, deployment target iOS 15.
 3. In App Store Connect → Apps → **+** → New App, select iOS, primary language Arabic, the exact registered bundle ID, a unique internal SKU (suggested `MK-IOS-001`), the Arabic name below, and appropriate user access. Use an existing app record for this bundle ID if it already exists. [Create an app record](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app/)
-4. Run the commands below. In Xcode → Runner target → Signing & Capabilities, select the publisher team on all configurations. Verify Push Notifications, Background Modes → Remote notifications, Release entitlements `aps-environment=production` and the signing profile. Verify the Firebase iOS app and bundle ID against `lib/firebase_options.dart`. The registered native config is already present at `ios/Runner/GoogleService-Info.plist`. In Xcode choose File → Add Files to Runner, select this existing file, choose the Runner target, and verify it appears once in Build Phases → Copy Bundle Resources. Skip Add Files if the resource is already included. The project uses explicit resource membership. In Firebase Cloud Messaging configure the correct Apple Team, key ID and APNs authentication key for production.
+4. Run the commands below. In Xcode → Runner target → Signing & Capabilities, select the publisher team on all configurations. Verify Push Notifications, Background Modes → Remote notifications, Release entitlements `aps-environment=production` and the signing profile. Verify the Firebase iOS app and bundle ID against `lib/firebase_options.dart`. The Runner target already includes `ios/Runner/GoogleService-Info.plist` once in Build Phases → Copy Bundle Resources. In Firebase Cloud Messaging configure the correct Apple Team, key ID and APNs authentication key for production.
 5. Install a current fastlane and create an App Store Connect team API key with roles for the actions below, or use an appropriately authorized Apple ID in Xcode. Store the key outside the repository. Set `ASC_API_KEY_PATH` to the local fastlane API key JSON containing `key_id`, `issuer_id` and the private key contents in `key`. This key authenticates uploads. The distribution identity and provisioning profile sign the binary. [fastlane API keys](https://docs.fastlane.tools/app-store-connect-api/)
 
 ~~~bash
@@ -87,6 +89,8 @@ flutter doctor -v
 flutter pub get
 open ios/Runner.xcworkspace
 ~~~
+
+For Codemagic, connect the publisher team's App Store Connect integration, select App Store distribution for the Runner Bundle ID, and make the matching Apple Distribution identity and provisioning profile available to the macOS runner. Keep signing material in the team's secure storage. Use Flutter 3.50.0 and Shorebird CLI 1.6.149, record the exact Xcode image, and restore packages with `flutter pub get --enforce-lockfile`. Apply the profile with `xcode-project use-profiles` and pass the generated export-options plist to Shorebird with `--export-options-plist`. Set `manageAppVersionAndBuildNumber` to `false` to preserve the build number used for patches. Supply the approved store configuration and protected `SHOREBIRD_TOKEN` on the runner. [Codemagic signing](https://docs.codemagic.io/yaml-code-signing/signing-ios/) · [Shorebird on Codemagic](https://docs.shorebird.dev/code-push/ci/codemagic/)
 
 ## 6. Build the release IPA on macOS
 
@@ -142,7 +146,7 @@ Choose the iOS version in App Store Connect → Distribution. Set primary langua
 
 **Reviewer instructions to paste in English**
 
-Public content opens immediately in Arabic. The bottom tabs, from right to left, are Home, News, Courses, Activities, Homework and Settings. In Courses or Activities open an available program, register a sample participant, then check My Registrations on the same installation. Notifications are optional. Find Privacy Policy and Terms under Settings. Staff sign in using the administrator link at the bottom of Settings. Signed-in staff can publish content, manage registrations and permanently delete their own account under Settings.
+Public content opens immediately in Arabic. The bottom tabs, from right to left, are Home, News, Courses, Activities, Homework and Settings. In Courses or Activities open an available program, register a sample participant, then ask staff to verify the participant and device reference, then check My Registrations on the same installation. Notifications are optional. Find Privacy Policy and Terms under Settings. Staff sign in using the administrator link at the bottom of Settings. Signed-in staff can publish content, manage registrations and permanently delete their own account under Settings.
 
 Place working review credentials in the store's private review field. Current admins can view all registration records and manage other admins. A new admin on a populated production database has the same access. Use an isolated review experience with representative data before giving reviewers credentials. Provide a reachable review contact and verify access throughout review, including after account deletion testing.
 

@@ -4,6 +4,8 @@
 
 [Phone screenshots](google-play/phone/) · [7-inch](google-play/tablet-7/) · [10-inch](google-play/tablet-10/) · [Icon](google-play/icon-512.png) · [Feature graphic](google-play/feature-graphic.png) · [Open testing](#8-open-testing-on-google-play) · [Production](#9-production-on-google-play)
 
+See [registration privacy and release checks](REGISTRATION-PRIVACY.md) for the staff verification flow, individual erasure, retention decisions, and release evidence.
+
 ## 1. Confirm the release inputs
 
 Run terminal commands from the repository root. Use Flutter 3.50.0 / Dart 3.14, Node.js 24 and the committed dependency lock files. The current app version is `1.0.0+1`. Check the store history first. Set the marketing version and the next unused, increasing build number in `pubspec.yaml` **before** building. Keep the tested binary, source revision and exact build configuration together.
@@ -45,7 +47,7 @@ node scripts/verify-store-assets.cjs
 firebase emulators:exec --only auth,functions,firestore --project masjid-khalid-app "node scripts/test-firebase-local.cjs"
 ~~~
 
-The last command writes disposable local emulator data. Before making the app available, verify the deployed Firestore/Storage rules, services, IAM, billing, Gmail SMTP secrets, event triggers and scheduled jobs. Test real registration, status on the originating device, denied notifications, staff image upload, recovery and account erasure with designated test data. Check that hidden entries and private registrations are protected, including existing media download links. Staff self-deletion requires the two new Functions. After checking the target project, deploy the worker first, then the public callable. Confirm the worker completes, removes Auth and recovery records, and leaves other accounts intact. Monitor failed events and outstanding `security_account_deletions` documents.
+The last command writes disposable local emulator data. Before making the app available, verify the deployed Firestore/Storage rules, services, IAM, billing, Gmail SMTP secrets, event triggers and scheduled jobs. Test real registration, status on the staff-verified originating installation, denied notifications, staff image upload, recovery and account erasure with designated test data. Check that hidden entries and private registrations are protected, including existing media download links. Staff self-deletion requires the two new Functions. After checking the target project, deploy the worker first, then the public callable. Confirm the worker completes, removes Auth and recovery records, and leaves other accounts intact. Monitor failed events and outstanding `security_account_deletions` documents.
 
 ~~~powershell
 firebase deploy --only functions:finishAccountDeletion --project masjid-khalid-app --force
@@ -74,12 +76,10 @@ Install fastlane on the build/upload host and run `fastlane --version`. A mainta
 
 1. Sign into the publisher's verified Play Console account. Confirm legal entity, identity, public developer contacts, agreements and developer verification/territory requirements in the account dashboard. Choose **All apps → Create app**. Set the name shown below, default language Arabic, App, and the confirmed price (suggested Free). Accept the declarations and create the app. If the package already has a record, open that record.
 2. Android package/application ID is `com.masjidkhalidbinwaleed.masjid_khalid_app`. The first artifact establishes this identity. Enable Play App Signing. Distinguish the upload key kept by the publisher from the app signing key managed by Google. For an existing listing use its registered upload key. Verify the release signing certificate fingerprints in Play Console and add applicable SHA fingerprints to the matching Firebase Android app.
-3. For a **new** app with no existing upload key, use a private, backed-up directory outside the repository and run the following in PowerShell. Enter strong passwords interactively. Set `UPLOAD_KEYSTORE` to the full path to a new JKS file first. Never replace an existing key. Copy `android/key.properties.example` to `android/key.properties`. Enter the real storeFile (absolute path with forward slashes), keyAlias, storePassword and keyPassword in the local file. Protect copies of the key and credentials.
+3. This project already has a verified JKS upload key. On a fresh build host, restore it from publisher-controlled storage outside the repository. Supply the ignored `android/key.properties` privately using the fields in `android/key.properties.example`. Preserve the exact passwords when populating Java properties. To check the public certificate locally, set `UPLOAD_KEYSTORE` to the path of the existing keystore and enter the store password at the prompt.
 
 ~~~powershell
-keytool -genkeypair -v -keystore "$env:UPLOAD_KEYSTORE" -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
-Copy-Item android/key.properties.example android/key.properties
-keytool -list -v -keystore "$env:UPLOAD_KEYSTORE" -alias upload
+keytool -list -v -storetype JKS -keystore "$env:UPLOAD_KEYSTORE" -alias upload
 ~~~
 
 4. Install Android platform 36 or higher as required by the build, Android SDK Build Tools, Java compatible with Gradle and a compatible NDK. The local Flutter SDK and the generated Release manifest target API 36. Google requires API 36+ for ordinary new mobile submissions as of this check. Inspect the signed AAB because Shorebird builds with its own Flutter toolchain. [Target API requirements](https://support.google.com/googleplay/android-developer/answer/11926878) · [Play App Signing](https://developer.android.com/studio/publish/app-signing)
@@ -129,7 +129,7 @@ In Grow users → Store presence → Main store listing, select Arabic. Enter ti
 
 **Reviewer instructions to paste in English**
 
-Public content opens immediately in Arabic. The bottom tabs, from right to left, are Home, News, Courses, Activities, Homework and Settings. In Courses or Activities open an available program, register a sample participant, then check My Registrations on the same installation. Notifications are optional. Find Privacy Policy and Terms under Settings. Staff sign in using the administrator link at the bottom of Settings. Signed-in staff can publish content, manage registrations and permanently delete their own account under Settings.
+Public content opens immediately in Arabic. The bottom tabs, from right to left, are Home, News, Courses, Activities, Homework and Settings. In Courses or Activities open an available program, register a sample participant, then ask staff to verify the participant and device reference, then check My Registrations on the same installation. Notifications are optional. Find Privacy Policy and Terms under Settings. Staff sign in using the administrator link at the bottom of Settings. Signed-in staff can publish content, manage registrations and permanently delete their own account under Settings.
 
 Place working review credentials in the store's private review field. Current admins can view all registration records and manage other admins. A new admin on a populated production database has the same access. Use an isolated review experience with representative data before giving reviewers credentials. Provide a reachable review contact and verify access throughout review, including after account deletion testing.
 

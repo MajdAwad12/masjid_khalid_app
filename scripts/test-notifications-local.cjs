@@ -7,18 +7,22 @@ const Module = require('node:module');
 const root = path.join(__dirname, '..', 'functions');
 const originalLoad = Module._load;
 const delivered = [];
-let failNext = false;
+let failNext = null;
+let duringSend = null;
 class HttpsError extends Error {constructor(code, message){super(message);this.code=code;}}
 class Timestamp {constructor(ms){this.ms=ms;}toMillis(){return this.ms;}static fromMillis(ms){return new Timestamp(ms);}}
 const mocks = {
   'firebase-functions/v2/https': {onCall:(opts,handle)=>({opts,handle}),HttpsError},
   'firebase-functions/v2/firestore': {
+    onDocumentCreated:(opts,handle)=>({opts,handle}),
+    onDocumentUpdated:(opts,handle)=>({opts,handle}),
     onDocumentDeleted:(opts,handle)=>({opts,handle}),
     onDocumentWritten:(opts,handle)=>({opts,handle}),
   },
-  'firebase-admin/firestore': {FieldValue:{serverTimestamp:()=>({time:'now'})},Timestamp},
+  'firebase-admin/firestore': {FieldPath:{documentId:()=>'__name__'},FieldValue:{serverTimestamp:()=>({time:'now'})},Timestamp},
   'firebase-admin/messaging': {getMessaging:()=>({send:async(msg)=>{
-    if(failNext){failNext=false; const err=new Error('simulated transport');err.code='messaging/server-unavailable';throw err;}
+    if(duringSend){const action=duringSend;duringSend=null;await action();}
+    if(failNext){const err=new Error('simulated transport');err.code=failNext;failNext=null;throw err;}
     delivered.push(msg);return `fake-message-${delivered.length}`;
   }})},
   './deletion_cleanup': {deleteLinkedRegistrations:async()=>0},
@@ -34,16 +38,26 @@ Module._load=originalLoad;
 class Database {
   constructor(){this.tables = new Map();}
   table(name){if(!this.tables.has(name))this.tables.set(name,new Map());return this.tables.get(name);}
-  ref(name,id){return {id, name, db:this, update:async(data)=>{Object.assign(this.table(name).get(id),data);}};}
+  ref(name,id){return {id, name, db:this, get:async()=>this.snapshot(name,id), update:async(data)=>{Object.assign(this.table(name).get(id),data);}};}
   snapshot(name,id){const value=this.table(name).get(id);return {
     exists:value!==undefined,id,ref:this.ref(name,id),get:(key)=>value?.[key],
     data:()=>value?{...value}:undefined,
   };}
-  collection(name){return {
-    doc:(id)=>this.ref(name,id),
-    where:(field,op,value)=>({limit:()=>({get:async()=>({docs:[...this.table(name)].filter(([,v])=>v[field]===value)
-      .map(([id])=>this.snapshot(name,id))})})}),
-  };}
+  collection(name){
+    const filters=[];
+    let cursor='', size=Infinity;
+    const query={
+      doc:id=>this.ref(name,id),
+      where(field,op,value){assert.equal(op,'==');filters.push([field,value]);return query;},
+      orderBy(){return query;},
+      startAfter(id){cursor=id;return query;},
+      limit(n){size=n;return query;},
+      get:async()=>({docs:[...this.table(name)].sort(([a],[b])=>a.localeCompare(b))
+        .filter(([id,row])=>id>cursor&&filters.every(([f,v])=>row[f]===v))
+        .slice(0,size).map(([id])=>this.snapshot(name,id))}),
+    };
+    return query;
+  }
   batch(){const actions=[];return {update:(ref,values)=>actions.push([ref,values]),
     commit:async()=>{for(const [ref,values] of actions)Object.assign(this.table(ref.name).get(ref.id),values);}};}
   async runTransaction(fn){const tx={
@@ -64,7 +78,7 @@ async function testDecisionRecovery(kind){
   const itemId=isCourse?'courseId':'activityId';
   const secret=hash(isCourse?`course-device\0${deviceKey}`:`activity-installation\0${deviceKey}`);
   const id='b'.repeat(64);
-  db.table(collection).set(id,{[itemId]:'C12345678901',deviceKeyHash:secret,
+  db.table(collection).set(id,{[itemId]:'C12345678901',deviceKeyHash:secret,deviceVerified:true,
     status:'accepted',decidedBy:'admin',notificationState:'no-token',fcmToken:null,
     fullName:'Test Participant',activityTitle:'Trip',courseTitle:'Course'});
   const make=isCourse?courses.makeCourseFunctions:activities.makeActivityFunctions;
@@ -72,36 +86,89 @@ async function testDecisionRecovery(kind){
   const fn=isCourse?functions.syncCourseDeviceToken: functions.syncActivityDeviceToken;
   const data=isCourse?{deviceKey,fcmToken:token}:{deviceKey,fcmToken:token};
   let result=await fn.handle({data});
-  assert.equal(result.updated,1);
-  assert.equal(result.recovered,1);
+  assert.deepEqual(result,{synced:true});
   assert.equal(db.snapshot(collection,id).get('notificationState'),'sent');
-  assert.equal(delivered.at(-1).data.type,isCourse?'course_decision':'activity_decision');
+  assert.deepEqual(delivered.at(-1).data,{type:'registration_update'});
+  assert.deepEqual(delivered.at(-1).notification,{title:'لديك تحديث جديد',body:'افتح التطبيق للاطلاع على التحديث.'});
   assert.equal(delivered.at(-1).token,token);
   const before=delivered.length;
   result=await fn.handle({data});
-  assert.equal(result.recovered,0);
+  assert.deepEqual(result,{synced:true});
   assert.equal(delivered.length,before,`${kind} repeated sync must not resend`);
 
   // A transient FCM error is retried on the next successful token sync.
   Object.assign(db.table(collection).get(id),{status:'rejected',decidedBy:'admin',
     notificationState:'failed',fcmToken:oldToken});
-  failNext=true;
+  failNext='messaging/server-unavailable';
   result=await fn.handle({data});
-  assert.equal(result.recovered,0);
+  assert.deepEqual(result,{synced:true});
   assert.equal(db.snapshot(collection,id).get('notificationState'),'failed');
   result=await fn.handle({data});
-  assert.equal(result.recovered,1);
-  assert.equal(delivered.at(-1).data.status,'rejected');
+  assert.deepEqual(result,{synced:true});
+  assert.deepEqual(delivered.at(-1).data,{type:'registration_update'});
 
-  // Automatic acceptance is shown immediately in the registration dialog;
-  // don't send an old acceptance push when the user next opens the app.
+  const row=db.table(collection).get(id);
+  Object.assign(row,{notificationState:'ready',notificationAttempts:0,deviceVerified:false});
+  const hidden=delivered.length;
+  await fn.handle({data});
+  assert.equal(delivered.length,hidden+1);
+  Object.assign(row,{notificationState:'ready',notificationAttempts:0});
+  failNext='messaging/registration-token-not-registered';
+  await fn.handle({data});
+  assert.equal(row.fcmToken,null);
+  await fn.handle({data});
+  assert.equal(row.fcmToken,null,'invalidated token must stay cleared');
+  await fn.handle({data:{deviceKey,fcmToken:oldToken}});
+  assert.equal(row.notificationState,'sent');
+  Object.assign(row,{notificationState:'reserved',notificationStartedMs:1,notificationAttempts:1});
+  await fn.handle({data:{deviceKey,fcmToken:oldToken}});
+  assert.equal(row.notificationState,'sent','expired pre-dispatch reservation recovers');
+  Object.assign(row,{notificationState:'sending',notificationStartedMs:1});
+  const uncertain=delivered.length;
+  await fn.handle({data});
+  assert.equal(row.notificationState,'uncertain');
+  assert.equal(delivered.length,uncertain);
+  Object.assign(row,{notificationState:'ready',notificationAttempts:0});
+  for(let i=0;i<4;i++){
+    failNext='messaging/server-unavailable';
+    await fn.handle({data});
+  }
+  failNext=null;
+  assert.equal(row.notificationAttempts,3);
+  assert.equal(delivered.length,uncertain);
+  Object.assign(row,{notificationState:'ready',notificationAttempts:0,fcmToken:oldToken});
+  const worker=isCourse?functions.recoverCourseDecisionDelivery:functions.recoverActivityDecisionDelivery;
+  const event={data:{after:db.snapshot(collection,id)}};
+  const beforeWorker=delivered.length;
+  await worker.handle(event);
+  await worker.handle(event);
+  assert.equal(delivered.length,beforeWorker+1,'interrupted callable and replay share one completed decision');
+  // Historical automatic decisions are never replayed on upgrade.
   Object.assign(db.table(collection).get(id),{notificationState:'no-token',
     decidedBy:'automatic'});
   const noExtra=delivered.length;
   result=await fn.handle({data});
-  assert.equal(result.recovered,0);
+  assert.deepEqual(result,{synced:true});
   assert.equal(delivered.length,noExtra);
-  console.log(`PASS ${kind}: late token, idempotency, failed send retry, automatic decision excluded`);
+  const created=isCourse?functions.notifyAutomaticCourseDecision:functions.notifyAutomaticActivityDecision;
+  Object.assign(row,{notifyAutomatic:true,status:"accepted",notificationState:"ready",notificationAttempts:0});
+  await created.handle({data:db.snapshot(collection,id)});
+  await created.handle({data:db.snapshot(collection,id)});
+  assert.equal(delivered.length,noExtra+1);
+  assert.equal(delivered.at(-1).token,oldToken,'previously invalid token stays suppressed');
+  assert.deepEqual(delivered.at(-1).data,{type:"registration_update"});
+  const rotated="ROTATED_TOKEN_"+"R".repeat(40);
+  Object.assign(row,{notificationState:"ready",notificationAttempts:0});
+  duringSend=()=>fn.handle({data:{deviceKey,fcmToken:rotated}});
+  failNext="messaging/invalid-registration-token";
+  await fn.handle({data:{deviceKey,fcmToken:oldToken}});
+  assert.equal(row.fcmToken,rotated);
+  assert.equal(row.notificationState,"ready","rotation survives in-flight invalidation");
+  await worker.handle(event);
+  await worker.handle(event);
+  assert.equal(delivered.at(-1).token,rotated);
+  assert.equal(delivered.length,noExtra+2);
+  console.log(`PASS ${kind}: generic payload, preverification and automatic delivery, rotation, invalidation, bounded retries, interrupted sends and deduplication`);
 }
 
 async function testPublic(){
@@ -146,6 +213,12 @@ async function testPublic(){
   assert.equal(permanentAttempts,1);
   assert.equal(db.snapshot('security_public_notification_deliveries',
     'announcements_BAD12345678').get('state'),'failed');
+  const ledger=db.table('security_public_notification_deliveries');
+  ledger.set('courses_interrupted',{state:'reserved',leaseUntil:0,attempts:1});
+  assert.equal(await publicPush.publishOnce(db,'courses','interrupted',{title:'A'},async()=>'ok'),true);
+  ledger.set('courses_unknown',{state:'dispatching',leaseUntil:0});
+  assert.equal(await publicPush.publishOnce(db,'courses','unknown',{title:'A'},async()=>assert.fail()),false);
+  assert.equal(ledger.get('courses_unknown').state,'uncertain');
   console.log('PASS public: 4 triggers, dedupe, transient retries, permanent failure');
 }
 (async()=>{await testDecisionRecovery('course');await testDecisionRecovery('activity');await testPublic();

@@ -85,6 +85,13 @@ function loadModule(filename, fakeStorage) {
     "firebase-functions/logger": {info: () => {}, warn: () => {}},
   };
   const localRequire = (id) => {
+    if (id === "./registration_capacity") {
+      return require(path.join(__dirname, "..", "functions", "registration_capacity.js"));
+    }
+    if (id === "./registration_privacy") {
+      // Individual records are exercised by the emulator suite.
+      return {recoverDecisionCreates: () => () => {}, recoverDecisionUpdates: () => () => {}, staffRegistrationAction: () => () => { throw new Error("Unexpected registration action"); }};
+    }
     if (id === "./deletion_cleanup") {
       return require(path.join(__dirname, "..", "functions", "deletion_cleanup.js"));
     }
@@ -133,6 +140,8 @@ function loadModule(filename, fakeStorage) {
   await assert.rejects(activities.deleteActivity({data: {activityId: id}}),
       (err) => err.code === "not-found");
 
+  db.seed("course_counts", id, {pendingCount: 1});
+  db.seed("activity_counts", id, {acceptedCount: 1});
   db.seed("courses", id, {title: "test"});
   db.seed("activities", id, {title: "test"});
   for (let i = 0; i < 457; i++) {
@@ -143,6 +152,8 @@ function loadModule(filename, fakeStorage) {
   db.seed("activity_registrations", "unrelated-activity", {activityId: "another-id"});
   await courses.deleteCourse({data: {courseId: id}});
   await activities.deleteActivity({data: {activityId: id}});
+  assert.equal(db.has("course_counts", id), false);
+  assert.equal(db.has("activity_counts", id), false);
   assert.equal(db.has("courses", id), false);
   assert.equal(db.has("activities", id), false);
   await courses.cleanupDeletedCourseRegistrations({params: {courseId: id}});
@@ -157,7 +168,7 @@ function loadModule(filename, fakeStorage) {
   await activities.cleanupDeletedActivityAssets({params: {activityId: id},
     data: {get: () => "not-an-owned-image"}});
   assert.equal(storageDeletions.length, 1);
-  console.log("PASS: 12 checks (admin access, invalid IDs, absent docs, " +
+  console.log("PASS: 14 checks (private counts, admin access, invalid IDs, absent docs, " +
       "parent deletion, 457 linked registrations, unrelated records, " +
       "image safety, retry idempotency)");
 })().catch((error) => {console.error(error); process.exitCode = 1;});

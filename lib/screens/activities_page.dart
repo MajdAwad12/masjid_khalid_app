@@ -1,3 +1,6 @@
+import '../services/registration_privacy.dart';
+import '../widgets/registration_privacy_actions.dart';
+
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,6 +25,9 @@ class ActivitiesPage extends StatefulWidget {
 
 class _ActivitiesPageState extends State<ActivitiesPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final _counts = FirebaseFirestore.instance
+      .collection('activity_counts')
+      .snapshots(includeMetadataChanges: true);
   Timer? _refreshTimer;
   String? _deletingId;
 
@@ -93,15 +99,13 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
   }
 
   Future<void> _register(ActivityItem item) async {
-    final status = await showDialog<String>(
+    final submitted = await showDialog<bool>(
       context: context,
       builder: (_) => ActivityRegistrationDialog(activity: item),
     );
-    if (!mounted || status == null) return;
+    if (!mounted || submitted != true) return;
     _notice(
-      status == 'accepted'
-          ? 'تم قبول تسجيلك بنجاح 🎉'
-          : 'تم إرسال طلب التسجيل وبانتظار موافقة المسؤول',
+      'استلمنا طلبك. هذه الرسالة لا تؤكد حجز مقعد. تظهر الحالة في «تسجيلاتي» بعد تحقق الإدارة من المشارك والجهاز.',
     );
   }
 
@@ -121,12 +125,30 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.isAdmin) return _programs(null);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _counts,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (snapshot.hasError || data == null || data.metadata.isFromCache ||
+            data.metadata.hasPendingWrites) {
+          return _programs(null);
+        }
+        return _programs({for (final doc in data.docs) doc.id: doc.data()});
+      },
+    );
+  }
+
+  Widget _programs(Map<String, Map<String, dynamic>>? counts) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _stream,
       builder: (context, snapshot) {
         final items =
             snapshot.data?.docs
-                .map(ActivityItem.fromDocument)
+                .map((doc) => ActivityItem.fromDocument(
+                      doc,
+                      counts: counts == null ? null : counts[doc.id] ?? doc.data(),
+                    ))
                 .where((a) => widget.isAdmin || a.isPublic)
                 .toList() ??
             <ActivityItem>[];
@@ -183,6 +205,7 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
                       child: _ActivityCard(
                         item: a,
                         isAdmin: widget.isAdmin,
+                        showCounts: counts != null,
                         onEdit: _deletingId == null ? () => _edit(a) : null,
                         onDelete: _deletingId == null
                             ? () => _deleteActivity(a)
@@ -228,6 +251,7 @@ class _ActivitiesMessage extends StatelessWidget {
 class _ActivityCard extends StatelessWidget {
   final ActivityItem item;
   final bool isAdmin;
+  final bool showCounts;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final VoidCallback onRegister;
@@ -236,6 +260,7 @@ class _ActivityCard extends StatelessWidget {
   const _ActivityCard({
     required this.item,
     required this.isAdmin,
+    required this.showCounts,
     required this.onEdit,
     required this.onDelete,
     required this.onRegister,
@@ -390,7 +415,7 @@ class _ActivityCard extends StatelessWidget {
                     text: 'العودة: ${ActivityItem.formatDate(item.returnAt!)}',
                     accent: accent,
                   ),
-                if (isAdmin && item.capacity != null)
+                if (showCounts && item.capacity != null)
                   MosqueMetaLine(
                     icon: Icons.groups_outlined,
                     text:
@@ -424,7 +449,7 @@ class _ActivityCard extends StatelessWidget {
                       ? Icons.lock_outline
                       : Icons.check_circle_outline,
                 ),
-                if (isAdmin) ...[
+                if (showCounts) ...[
                   const SizedBox(height: 12),
                   Text(
                     'بانتظار الموافقة: ${item.pendingCount}  ·  '
@@ -435,6 +460,8 @@ class _ActivityCard extends StatelessWidget {
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                ],
+                if (isAdmin) ...[
                   const SizedBox(height: 13),
                   Row(
                     textDirection: TextDirection.rtl,
@@ -564,7 +591,7 @@ class _MyActivityRegistrationsDialog extends StatefulWidget {
 
 class _MyActivityRegistrationsDialogState
     extends State<_MyActivityRegistrationsDialog> {
-  late Future<List<Map<String, dynamic>>> _entries;
+  late Future<RegistrationInbox> _entries;
 
   @override
   void initState() {
@@ -578,19 +605,25 @@ class _MyActivityRegistrationsDialogState
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Row(
+    title: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Expanded(child: Text('📋 تسجيلاتي')),
-        IconButton(
-          onPressed: () => setState(_refresh),
-          tooltip: 'تحديث الحالات',
-          icon: const Icon(Icons.refresh_outlined),
+        Row(
+          children: [
+            const Expanded(child: Text('📋 تسجيلاتي')),
+            IconButton(
+              onPressed: () => setState(_refresh),
+              tooltip: 'تحديث الحالات',
+              icon: const Icon(Icons.refresh_outlined),
+            ),
+          ],
         ),
+        RegistrationReference(_entries),
       ],
     ),
     content: SizedBox(
       width: 490,
-      child: FutureBuilder<List<Map<String, dynamic>>>(
+      child: FutureBuilder<RegistrationInbox>(
         future: _entries,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -602,9 +635,9 @@ class _MyActivityRegistrationsDialogState
               child: Center(child: CircularProgressIndicator()),
             );
           }
-          final items = snapshot.data!;
+          final items = snapshot.data!.entries;
           if (items.isEmpty) {
-            return const Text('لا توجد تسجيلات من هذا الجهاز');
+            return const Text('لا توجد حالات متاحة للعرض بعد تحقق الإدارة.');
           }
           return SizedBox(
             height: (items.length * 123.0).clamp(130.0, 385.0),
@@ -638,7 +671,9 @@ class _MyActivityRegistrationsDialogState
                       const SizedBox(height: 9),
                       MosqueTag(
                         color: color,
-                        text: status == 'accepted'
+                        text: status == 'withdrawn'
+                            ? 'تم الانسحاب'
+                            : status == 'accepted'
                             ? 'تم قبول الطلب'
                             : status == 'rejected'
                             ? 'تم رفض الطلب'
@@ -666,4 +701,3 @@ class _MyActivityRegistrationsDialogState
     ],
   );
 }
-

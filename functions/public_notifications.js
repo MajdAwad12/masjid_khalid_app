@@ -3,6 +3,7 @@
 
 // Public-only FCM broadcasts. No personal registration records or user IDs
 // are sent to the topic. All writes to the delivery ledger are Admin SDK only.
+const crypto = require("node:crypto");
 const {onDocumentWritten} = require("firebase-functions/v2/firestore");
 const {getMessaging} = require("firebase-admin/messaging");
 const {FieldValue, Timestamp} = require("firebase-admin/firestore");
@@ -72,7 +73,7 @@ function messageFor(kind, data, itemId) {
 // an ambiguous network failure; its API cannot promise exactly-once delivery.
 const transientCodes = new Set([
   "messaging/server-unavailable", "messaging/internal-error",
-  "messaging/unknown-error", "unavailable", "deadline-exceeded",
+  "messaging/quota-exceeded", "unavailable",
 ]);
 
 async function sendWithTransientRetry(send, message) {
@@ -95,17 +96,49 @@ async function publishOnce(db, kind, itemId, data, send = (message) =>
   getMessaging().send(message)) {
   const ledger = db.collection(DELIVERY_COLLECTION)
       .doc(`${kind}_${itemId}`);
+  const attempt = crypto.randomUUID();
   const claimed = await db.runTransaction(async (tx) => {
     const before = await tx.get(ledger);
-    if (before.exists) return false;
-    tx.create(ledger, {kind, itemId, state: "claimed",
-      startedAt: FieldValue.serverTimestamp()});
+    if (before.exists) {
+      const state = before.get("state");
+      if (state === "dispatching") {
+        // FCM might already have accepted this message.
+        if (before.get("leaseUntil") <= Date.now()) {
+          tx.update(ledger, {state: "uncertain"});
+        }
+        return false;
+      }
+      if (state !== "reserved") return false;
+      if (before.get("leaseUntil") > Date.now()) {
+        throw new Error("Publication reservation still active.");
+      }
+      if (before.get("attempts") >= 3) {
+        tx.update(ledger, {state: "failed"});
+        return false;
+      }
+    }
+    const fields = {kind, itemId, state: "reserved", attempt,
+      attempts: (before.get("attempts") || 0) + 1,
+      leaseUntil: Date.now() + 120000, startedAt: FieldValue.serverTimestamp()};
+    if (before.exists) tx.update(ledger, fields);
+    else tx.create(ledger, fields);
     return true;
   });
   if (!claimed) return false;
+  const dispatch = await db.runTransaction(async (tx) => {
+    const doc = await tx.get(ledger);
+    if (doc.get("state") !== "reserved" || doc.get("attempt") !== attempt) {
+      return false;
+    }
+    tx.update(ledger, {state: "dispatching"});
+    return true;
+  });
+  if (!dispatch) return false;
+  let acknowledged = false;
   try {
     const id = await sendWithTransientRetry(send,
         messageFor(kind, data, itemId));
+    acknowledged = true;
     await ledger.update({state: "sent", messageId: id,
       sentAt: FieldValue.serverTimestamp()});
     return true;
@@ -115,7 +148,7 @@ async function publishOnce(db, kind, itemId, data, send = (message) =>
     logger.error("Public content notification failed", {kind, itemId,
       code: error.code || "unknown"});
     try {
-      await ledger.update({state: "failed",
+      await ledger.update({state: acknowledged ? "uncertain" : "failed",
         failedAt: FieldValue.serverTimestamp(),
         errorCode: String(error.code || "unknown").slice(0, 80)});
     } catch (updateError) {
@@ -147,7 +180,7 @@ function makePublicNotificationFunctions({db}) {
     output[config.functionName] = onDocumentWritten({
       document: `${kind}/{itemId}`,
       region: "us-central1",
-      maxInstances: 5,
+      maxInstances: 5, retry: true,
     }, (event) => handleWrite(db, kind, event));
   }
   return output;

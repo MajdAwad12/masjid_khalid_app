@@ -1,3 +1,5 @@
+import 'registration_privacy.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -51,23 +53,20 @@ class ActivitiesService {
     });
   }
 
-  static Future<String> register({
+  static Future<void> register({
     required String activityId,
     required String fullName,
     required String phone,
     required String deviceKey,
     String? fcmToken,
   }) async {
-    final response = await _functions.httpsCallable('registerForActivity').call(
-      {
-        'activityId': activityId,
-        'fullName': fullName.trim(),
-        'phone': phone.trim(),
-        'deviceKey': deviceKey,
-        'fcmToken': fcmToken,
-      },
-    );
-    return Map<String, dynamic>.from(response.data as Map)['status'] as String;
+    await submitRegistration('registerForActivity', {
+      'activityId': activityId,
+      'fullName': fullName.trim(),
+      'phone': phone.trim(),
+      'deviceKey': deviceKey,
+      'fcmToken': fcmToken,
+    });
   }
 
   static Future<bool> addParticipant(
@@ -107,24 +106,11 @@ class ActivitiesService {
     return Map<String, dynamic>.from(response.data as Map)['notified'] == true;
   }
 
-  static Future<List<Map<String, dynamic>>> myRegistrations(
-    String deviceKey,
-  ) async {
-    final response = await _functions
-        .httpsCallable('myActivityRegistrations')
-        .call({'deviceKey': deviceKey});
-    final data = Map<String, dynamic>.from(response.data as Map);
-    return (data['registrations'] as List? ?? [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-  }
+  static Future<RegistrationInbox> myRegistrations(String deviceKey) =>
+      readRegistrationInbox('myActivityRegistrations', deviceKey);
 
-  static Future<void> syncToken(String deviceKey, String token) async {
-    await _functions.httpsCallable('syncActivityDeviceToken').call({
-      'deviceKey': deviceKey,
-      'fcmToken': token,
-    });
-  }
+  static Future<void> syncToken(String deviceKey, String token) =>
+      syncRegistrationToken('syncActivityDeviceToken', deviceKey, token);
 
   static String error(Object error) {
     if (error is FirebaseFunctionsException) {

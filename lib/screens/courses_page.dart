@@ -1,3 +1,6 @@
+import '../services/registration_privacy.dart';
+import '../widgets/registration_privacy_actions.dart';
+
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,6 +27,9 @@ class CoursesPage extends StatefulWidget {
 
 class _CoursesPageState extends State<CoursesPage> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final _counts = FirebaseFirestore.instance
+      .collection('course_counts')
+      .snapshots(includeMetadataChanges: true);
   Timer? _clockRefresh;
   String? _deletingId;
 
@@ -117,16 +123,14 @@ class _CoursesPageState extends State<CoursesPage> {
   }
 
   Future<void> _register(Course course) async {
-    final status = await showDialog<String>(
+    final submitted = await showDialog<bool>(
       context: context,
       builder: (_) => CourseRegistrationDialog(course: course),
     );
-    if (!mounted || status == null) return;
-    if (status == 'accepted') {
-      _notice('تم تسجيلك بنجاح في الدورة');
-    } else {
-      _notice('تم إرسال طلبك وهو بانتظار موافقة المسؤول');
-    }
+    if (!mounted || submitted != true) return;
+    _notice(
+      'استلمنا طلبك. هذه الرسالة لا تؤكد حجز مقعد. تظهر الحالة في «تسجيلاتي» بعد تحقق الإدارة من المشارك والجهاز.',
+    );
   }
 
   Future<void> _showMyRegistrations(List<Course> courses) async {
@@ -146,11 +150,32 @@ class _CoursesPageState extends State<CoursesPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.isAdmin) return _programs(null);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _counts,
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (snapshot.hasError || data == null || data.metadata.isFromCache ||
+            data.metadata.hasPendingWrites) {
+          return _programs(null);
+        }
+        return _programs({for (final doc in data.docs) doc.id: doc.data()});
+      },
+    );
+  }
+
+  Widget _programs(Map<String, Map<String, dynamic>>? counts) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _stream,
       builder: (context, snapshot) {
         final all =
-            snapshot.data?.docs.map(Course.fromDocument).toList() ?? <Course>[];
+            snapshot.data?.docs
+                .map((doc) => Course.fromDocument(
+                      doc,
+                      counts: counts == null ? null : counts[doc.id] ?? doc.data(),
+                    ))
+                .toList() ??
+            <Course>[];
         final courses = all;
         return Center(
           child: ConstrainedBox(
@@ -202,6 +227,7 @@ class _CoursesPageState extends State<CoursesPage> {
                       child: _CourseCard(
                         course: course,
                         isAdmin: widget.isAdmin,
+                        showCounts: counts != null,
                         onRegister: () => _register(course),
                         onEdit: _deletingId == null
                             ? () => _openEditor(course)
@@ -259,6 +285,7 @@ class _CourseEmptyMessage extends StatelessWidget {
 class _CourseCard extends StatelessWidget {
   final Course course;
   final bool isAdmin;
+  final bool showCounts;
   final VoidCallback onRegister;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -268,6 +295,7 @@ class _CourseCard extends StatelessWidget {
   const _CourseCard({
     required this.course,
     required this.isAdmin,
+    required this.showCounts,
     required this.onRegister,
     required this.onEdit,
     required this.onDelete,
@@ -306,7 +334,7 @@ class _CourseCard extends StatelessWidget {
         ),
       if (course.location.trim().isNotEmpty)
         _detail(Icons.place_outlined, 'المكان: ${course.location}', scheme),
-      if (isAdmin && course.capacity != null)
+      if (showCounts && course.capacity != null)
         _detail(
           Icons.groups_outlined,
           'الأماكن المتبقية: ${course.remaining} من ${course.capacity}',
@@ -405,7 +433,7 @@ class _CourseCard extends StatelessWidget {
                   const SizedBox(height: 15),
                   ...details,
                 ],
-                if (isAdmin) ...[
+                if (showCounts) ...[
                   const SizedBox(height: 12),
                   Divider(color: scheme.outlineVariant),
                   const SizedBox(height: 9),
@@ -427,6 +455,8 @@ class _CourseCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                ],
+                if (isAdmin) ...[
                   const SizedBox(height: 12),
                   Row(
                     textDirection: TextDirection.rtl,
@@ -587,7 +617,7 @@ class _MyCourseRegistrationsDialog extends StatefulWidget {
 
 class _MyCourseRegistrationsDialogState
     extends State<_MyCourseRegistrationsDialog> {
-  late Future<List<Map<String, dynamic>>> _entries;
+  late Future<RegistrationInbox> _entries;
 
   @override
   void initState() {
@@ -605,19 +635,25 @@ class _MyCourseRegistrationsDialogState
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Row(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Expanded(child: Text('تسجيلاتي')),
-          IconButton(
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'تحديث الحالات',
+          Row(
+            children: [
+              const Expanded(child: Text('تسجيلاتي')),
+              IconButton(
+                onPressed: _refresh,
+                icon: const Icon(Icons.refresh),
+                tooltip: 'تحديث الحالات',
+              ),
+            ],
           ),
+          RegistrationReference(_entries),
         ],
       ),
       content: SizedBox(
         width: 480,
-        child: FutureBuilder<List<Map<String, dynamic>>>(
+        child: FutureBuilder<RegistrationInbox>(
           future: _entries,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
@@ -629,9 +665,9 @@ class _MyCourseRegistrationsDialogState
                 child: Center(child: CircularProgressIndicator()),
               );
             }
-            final entries = snapshot.data!;
+            final entries = snapshot.data!.entries;
             if (entries.isEmpty) {
-              return const Text('لا توجد تسجيلات من هذا الجهاز');
+              return const Text('لا توجد حالات متاحة للعرض بعد تحقق الإدارة.');
             }
             return SizedBox(
               height: entries.length > 3 ? 360 : entries.length * 107.0,
@@ -678,7 +714,9 @@ class _MyCourseRegistrationsDialogState
                         ],
                         const SizedBox(height: 9),
                         CourseStatusBadge(
-                          label: status == 'accepted'
+                          label: status == 'withdrawn'
+                              ? 'تم الانسحاب'
+                              : status == 'accepted'
                               ? 'تم قبول الطلب'
                               : status == 'rejected'
                               ? 'تم رفض الطلب'
@@ -708,4 +746,3 @@ class _MyCourseRegistrationsDialogState
     );
   }
 }
-

@@ -32,7 +32,10 @@ class Course {
     required this.registrationMode,
   });
 
-  factory Course.fromDocument(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory Course.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    Map<String, dynamic>? counts,
+  }) {
     final map = doc.data() ?? <String, dynamic>{};
     final rawStart = map['startAt'];
     final rawCapacity = map['capacity'];
@@ -46,9 +49,9 @@ class Course {
       capacity: rawCapacity is num && rawCapacity > 0
           ? rawCapacity.toInt()
           : null,
-      acceptedCount: (map['acceptedCount'] as num?)?.toInt() ?? 0,
-      pendingCount: (map['pendingCount'] as num?)?.toInt() ?? 0,
-      rejectedCount: (map['rejectedCount'] as num?)?.toInt() ?? 0,
+      acceptedCount: (counts?['acceptedCount'] as num?)?.toInt() ?? 0,
+      pendingCount: (counts?['pendingCount'] as num?)?.toInt() ?? 0,
+      rejectedCount: (counts?['rejectedCount'] as num?)?.toInt() ?? 0,
       isOpen: map['isOpen'] == true,
       isVisible: map['isVisible'] != false,
       registrationMode: (map['registrationMode'] ?? 'approval').toString(),

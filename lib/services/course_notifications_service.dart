@@ -72,7 +72,8 @@ class CourseNotificationsService with widgets.WidgetsBindingObserver {
       onError: (Object error) {},
     );
     _messageSubscription ??= FirebaseMessaging.onMessage.listen((message) {
-      if (message.data['type'] != 'course_decision' &&
+      if (message.data['type'] != 'registration_update' &&
+          message.data['type'] != 'course_decision' &&
           message.data['type'] != 'activity_decision') {
         return;
       }

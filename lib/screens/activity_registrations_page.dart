@@ -1,3 +1,6 @@
+import '../auth/auth_gate.dart';
+import '../widgets/registration_privacy_actions.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -25,7 +28,7 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
     _stream = FirebaseFirestore.instance
         .collection('activity_registrations')
         .where('activityId', isEqualTo: widget.activity.id)
-        .snapshots();
+        .snapshots(includeMetadataChanges: true);
   }
 
   void _notice(String text) {
@@ -115,13 +118,35 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AuthGate(
+    appBuilder: (isAdmin) => isAdmin
+        ? _roster(context)
+        : Scaffold(
+            appBar: AppBar(),
+            body: const Center(
+              child: Text(
+                'يلزم اتصال بالخادم وصلاحية إدارة نشطة لعرض القائمة.',
+              ),
+            ),
+          ),
+  );
+
+  Widget _roster(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('إدارة المسجلين')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: _stream,
         builder: (context, snapshot) {
+          if (snapshot.hasData &&
+              !serverConfirmedStaffData(
+                fromCache: snapshot.data!.metadata.isFromCache,
+                pendingWrites: snapshot.data!.metadata.hasPendingWrites,
+              )) {
+            return const Center(
+              child: Text('يلزم اتصال بالخادم لعرض بيانات المشاركين.'),
+            );
+          }
           final docs = [...?snapshot.data?.docs];
           docs.sort((a, b) {
             final x = a.data()['createdAt'];
@@ -217,7 +242,11 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
                                 ],
                                 const SizedBox(height: 10),
                                 MosqueTag(
-                                  text: status == 'accepted'
+                                  text: status == 'unverified'
+                                      ? 'بانتظار التحقق'
+                                      : status == 'withdrawn'
+                                      ? 'منسحب'
+                                      : status == 'accepted'
                                       ? 'تم قبول الطلب'
                                       : status == 'rejected'
                                       ? 'تم رفض الطلب'
@@ -229,7 +258,20 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
                                   spacing: 9,
                                   runSpacing: 7,
                                   children: [
-                                    if (status != 'accepted')
+                                    RegistrationPrivacyActions(
+                                      key: ValueKey(doc.id),
+                                      course: false,
+                                      parentId: widget.activity.id,
+                                      registrationId: doc.id,
+                                      name: name,
+                                      needsVerification:
+                                          d['deviceKeyHash'] != null &&
+                                          d['deviceVerified'] != true,
+                                      withdrawn: status == 'withdrawn',
+                                    ),
+                                    if (status != 'accepted' &&
+                                        status != 'unverified' &&
+                                        status != 'withdrawn')
                                       FilledButton.icon(
                                         onPressed: _busy == null
                                             ? () => _decide(
@@ -241,7 +283,9 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
                                         icon: const Icon(Icons.check_outlined),
                                         label: const Text('قبول'),
                                       ),
-                                    if (status != 'rejected')
+                                    if (status != 'rejected' &&
+                                        status != 'unverified' &&
+                                        status != 'withdrawn')
                                       OutlinedButton.icon(
                                         onPressed: _busy == null
                                             ? () => _decide(
@@ -253,7 +297,12 @@ class _ActivityRegistrationsPageState extends State<ActivityRegistrationsPage> {
                                         icon: const Icon(Icons.close_outlined),
                                         label: const Text('رفض'),
                                       ),
-                                    if (status != 'pending' &&
+                                    if ([
+                                          'accepted',
+                                          'rejected',
+                                          'withdrawn',
+                                        ].contains(status) &&
+                                        d['notificationState'] != 'sent' &&
                                         (d['fcmToken'] ?? '')
                                             .toString()
                                             .isNotEmpty)
@@ -326,6 +375,7 @@ class _ActivityManualEntryDialogState
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const Text(guardianNotice),
             TextFormField(
               controller: _name,
               maxLength: 80,

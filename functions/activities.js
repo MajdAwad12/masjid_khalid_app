@@ -9,7 +9,13 @@ const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
 const {getStorage} = require("firebase-admin/storage");
 const {deleteLinkedRegistrations} = require("./deletion_cleanup");
 const {FieldValue, Timestamp} = require("firebase-admin/firestore");
-const {getMessaging} = require("firebase-admin/messaging");
+const {staffRegistrationAction, verificationReference, verifiedPage, syncPage,
+  newDecision, deliverDecision, retryDecision, recoverDecisionUpdates,
+  recoverDecisionCreates} =
+    require("./registration_privacy");
+const {countsRef, changeSeats, unverifiedDevice, initialRegistration,
+  installationAllowance} =
+    require("./registration_capacity");
 const logger = require("firebase-functions/logger");
 const states = new Set(["pending", "accepted", "rejected"]);
 const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
@@ -111,69 +117,6 @@ const parseActivity = (d, id) => {
   };
 };
 
-// Atomic counters: old status -> new status, once, inside each transaction.
-function adjustCounts(tx, ref, activity, oldStatus, newStatus) {
-  const counts = {
-    acceptedCount: Number(activity.get("acceptedCount")) || 0,
-    pendingCount: Number(activity.get("pendingCount")) || 0,
-    rejectedCount: Number(activity.get("rejectedCount")) || 0,
-  };
-  if (oldStatus && states.has(oldStatus)) {
-    counts[`${oldStatus}Count`] = Math.max(0, counts[`${oldStatus}Count`] - 1);
-  }
-  if (newStatus && states.has(newStatus)) counts[`${newStatus}Count`] += 1;
-  tx.update(ref, counts);
-}
-
-async function notify(db, id, registrationId, registration) {
-  const ref = db.collection("activity_registrations").doc(registrationId);
-  if (!registration.fcmToken) {
-    await ref.update({notificationState: "no-token"});
-    return false;
-  }
-  try {
-    await getMessaging().send({
-      token: registration.fcmToken,
-      notification: {
-        title: registration.status === "accepted" ?
-          "تم قبول تسجيلك في الرحلة أو النشاط" : "تم رفض طلب التسجيل",
-        body: `${registration.fullName || ""} — ` +
-          `${registration.activityTitle || ""}`,
-      },
-      data: {type: "activity_decision", activityId: id,
-        registrationId, status: registration.status},
-      android: {priority: "high"},
-      apns: {payload: {aps: {sound: "default"}}},
-    });
-    await ref.update({notificationState: "sent",
-      notifiedAt: FieldValue.serverTimestamp()});
-    return true;
-  } catch (error) {
-    logger.warn("Activity push failed", {registrationId,
-      code: error.code || "unknown"});
-    await ref.update({notificationState: "failed"});
-    return false;
-  }
-}
-
-// Recover an approval/rejection made while this installation had no FCM token.
-// Claim once transactionally before sending to avoid races between sync calls.
-async function recoverActivityDecision(db, ref, token) {
-  const registration = await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || snap.get("fcmToken") !== token ||
-        !["accepted", "rejected"].includes(snap.get("status")) ||
-        !["no-token", "failed"].includes(snap.get("notificationState")) ||
-        snap.get("decidedBy") === "automatic") {
-      return null;
-    }
-    tx.update(ref, {notificationState: "sending"});
-    return snap.data();
-  });
-  if (!registration) return false;
-  return notify(db, registration.activityId, ref.id, registration);
-}
-
 async function rateLimit(db, req, credentialHash) {
   const ip = req.rawRequest?.ip;
   if (typeof ip !== "string" || ip.length < 2) {
@@ -182,7 +125,8 @@ async function rateLimit(db, req, credentialHash) {
   const hour = Math.floor(Date.now() / 3600000);
   const rules = [
     {id: hash(`act-ip\0${ip}\0${hour}`), max: 60},
-    {id: hash(`act-device\0${credentialHash}\0${hour}`), max: 10},
+    {id: hash(`act-device\0${credentialHash}\0${hour}`),
+      max: installationAllowance.activity},
   ];
   const refs = rules.map((rule) => db.collection(
       "security_activity_limits").doc(rule.id));
@@ -204,6 +148,13 @@ function makeActivityFunctions({db, requireAdmin}) {
   const activities = db.collection("activities");
   const registrations = db.collection("activity_registrations");
   return {
+    notifyAutomaticActivityDecision: recoverDecisionCreates(db,
+        "activity_registrations"),
+    recoverActivityDecisionDelivery: recoverDecisionUpdates(db,
+        "activity_registrations"),
+    manageActivityRegistration: staffRegistrationAction({db, requireAdmin,
+      kind: "activity", parentId: requireId, regId: requireRegId,
+    }),
     saveActivity: onCall({region: "us-central1", maxInstances: 10},
         async (req) => {
           const uid = await requireAdmin(req);
@@ -216,8 +167,7 @@ function makeActivityFunctions({db, requireAdmin}) {
               tx.update(ref, {...item, updatedBy: uid,
                 updatedAt: FieldValue.serverTimestamp()});
             } else {
-              tx.create(ref, {...item, acceptedCount: 0,
-                pendingCount: 0, rejectedCount: 0, createdBy: uid,
+              tx.create(ref, {...item, createdBy: uid,
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp()});
             }
@@ -237,6 +187,7 @@ function makeActivityFunctions({db, requireAdmin}) {
             if (!activity.exists) {
               throw new HttpsError("not-found", "Activity not found.");
             }
+            tx.delete(countsRef(db, "activity", ref.id));
             tx.delete(ref);
           });
           return {deleted: true};
@@ -279,9 +230,7 @@ function makeActivityFunctions({db, requireAdmin}) {
             const [act, existing] = await Promise.all([
               tx.get(actRef), tx.get(ref),
             ]);
-            if (existing.exists) {
-              throw new HttpsError("already-exists", "Already registered.");
-            }
+
             if (!act.exists || act.get("isVisible") !== true ||
                 act.get("isOpen") !== true ||
                 (act.get("hideAt") instanceof Timestamp &&
@@ -291,25 +240,20 @@ function makeActivityFunctions({db, requireAdmin}) {
               throw new HttpsError(
                   "failed-precondition", "Registration closed.");
             }
-            const capacity = act.get("capacity");
-            const occupied = (Number(act.get("acceptedCount")) || 0) +
-              (Number(act.get("pendingCount")) || 0);
-            if (Number.isInteger(capacity) && occupied >= capacity) {
-              throw new HttpsError("resource-exhausted", "Activity is full.");
-            }
+            if (existing.exists) return {status: "submitted"};
             const status = act.get("registrationMode") === "automatic" ?
               "accepted" : "pending";
+            if (!await changeSeats(tx, act, null, status,
+                {device: hashKey, publicSubmission: true})) {
+              return {status: "submitted"};
+            }
             tx.create(ref, {activityId: id,
               activityTitle: act.get("title") || "", fullName, phone,
-              deviceKeyHash: hashKey, fcmToken, status, source: "public",
-              notificationState: "not-sent",
+              deviceKeyHash: hashKey, fcmToken,
+              ...initialRegistration(status), source: "public",
               createdAt: FieldValue.serverTimestamp(),
-              decidedAt: status === "accepted" ?
-                FieldValue.serverTimestamp() : null,
-              decidedBy: status === "accepted" ? "automatic" : null,
             });
-            tx.update(actRef, {[`${status}Count`]: FieldValue.increment(1)});
-            return {status};
+            return {status: "submitted"};
           });
         }),
     adminAddActivityParticipant: onCall({region: "us-central1",
@@ -330,11 +274,12 @@ function makeActivityFunctions({db, requireAdmin}) {
         if (before === "accepted") {
           throw new HttpsError("already-exists", "Already accepted.");
         }
-        adjustCounts(tx, actRef, act, before, "accepted");
+        await changeSeats(tx, act, before, "accepted",
+            {device: unverifiedDevice(old)});
         if (old.exists) {
           tx.update(regRef, {status: "accepted", decidedBy: uid,
             decidedAt: FieldValue.serverTimestamp(),
-            activityTitle: act.get("title") || ""});
+            activityTitle: act.get("title") || "", ...newDecision()});
         } else {
           tx.create(regRef, {activityId: id,
             activityTitle: act.get("title") || "", fullName: name,
@@ -346,9 +291,8 @@ function makeActivityFunctions({db, requireAdmin}) {
         }
         return {previous: old.exists ? old.data() : null};
       });
-      const notified = result.previous?.fcmToken ?
-        await notify(db, id, registrationId, {...result.previous,
-          status: "accepted"}) : false;
+      const notified = Boolean(result.previous) &&
+          await deliverDecision(db, regRef);
       return {notified};
     }),
     decideActivityRegistration: onCall({region: "us-central1",
@@ -372,21 +316,21 @@ function makeActivityFunctions({db, requireAdmin}) {
           throw new HttpsError("failed-precondition", "Invalid state.");
         }
         if (old === status) return {changed: false, reg: reg.data()};
-        adjustCounts(tx, actRef, act, old, status);
+        await changeSeats(tx, act, old, status,
+            {device: unverifiedDevice(reg)});
         tx.update(regRef, {status, decidedBy: uid,
           decidedAt: FieldValue.serverTimestamp(),
-          notificationState: "sending"});
+          ...newDecision()});
         return {changed: true, reg: {...reg.data(), status}};
       });
-      const notified = result.changed ? await notify(db, id, regId,
-          result.reg) : false;
+      const notified = result.changed && await deliverDecision(db, regRef);
       return {changed: result.changed, notified};
     }),
     myActivityRegistrations: onCall({region: "us-central1", maxInstances: 10},
         async (req) => {
           const keyHash = deviceHash(req.data?.deviceKey);
-          const snapshot = await registrations.where("deviceKeyHash", "==",
-              keyHash).limit(100).get();
+          const snapshot = await verifiedPage(db, "activity_registrations",
+              keyHash, req.data?.cursor);
           const ids = [...new Set(snapshot.docs.map((x) => x.get("activityId"))
               .filter((id) => typeof id === "string"))];
           const titles = new Map();
@@ -394,63 +338,34 @@ function makeActivityFunctions({db, requireAdmin}) {
             const doc = await activities.doc(id).get();
             if (doc.exists) titles.set(id, doc.get("title") || "");
           }));
-          return {registrations: snapshot.docs.map((doc) => ({
-            activityId: doc.get("activityId"),
-            activityTitle: titles.get(doc.get("activityId")) ||
+          return {reference: verificationReference(keyHash),
+            nextCursor: snapshot.nextCursor,
+            registrations: snapshot.docs.map((doc) => ({
+              deviceVerified: true,
+              activityId: doc.get("activityId"),
+              activityTitle: titles.get(doc.get("activityId")) ||
               doc.get("activityTitle") || "",
-            fullName: doc.get("fullName") || "",
-            status: doc.get("status"),
-          }))};
+              fullName: doc.get("fullName") || "",
+              status: doc.get("status"),
+            }))};
         }),
-    syncActivityDeviceToken: onCall({region: "us-central1", maxInstances: 10},
-        async (req) => {
-          const keyHash = deviceHash(req.data?.deviceKey);
-          const token = tokenField(req.data?.fcmToken);
-          if (!token) {
-            throw new HttpsError("invalid-argument", "Token missing.");
-          }
-          const snap = await registrations.where("deviceKeyHash", "==",
-              keyHash).limit(100).get();
-          const batch = db.batch();
-          let count = 0;
-          for (const doc of snap.docs) {
-            if (doc.get("fcmToken") !== token) {
-              batch.update(doc.ref, {fcmToken: token});
-              count++;
-            }
-          }
-          if (count) await batch.commit();
-          let recovered = 0;
-          for (const doc of snap.docs) {
-            if (!["no-token", "failed"].includes(
-                doc.get("notificationState"))) continue;
-            if (await recoverActivityDecision(db, doc.ref, token)) {
-              recovered++;
-            }
-          }
-          return {updated: count, recovered};
-        }),
+    syncActivityDeviceToken: onCall({region: "us-central1", maxInstances: 10,
+      timeoutSeconds: 300},
+    async (req) => {
+      const keyHash = deviceHash(req.data?.deviceKey);
+      const token = tokenField(req.data?.fcmToken);
+      if (!token) {
+        throw new HttpsError("invalid-argument", "Token missing.");
+      }
+      return syncPage(db, "activity_registrations", keyHash, token);
+    }),
     resendActivityDecision: onCall({region: "us-central1", maxInstances: 10},
         async (req) => {
           await requireAdmin(req);
           const id = requireId(req.data?.activityId);
           const regId = requireRegId(req.data?.registrationId);
           const ref = registrations.doc(regId);
-          const data = await db.runTransaction(async (tx) => {
-            const reg = await tx.get(ref);
-            if (!reg.exists || reg.get("activityId") !== id ||
-                !["accepted", "rejected"].includes(reg.get("status"))) {
-              throw new HttpsError("failed-precondition", "No decision.");
-            }
-            const last = reg.get("lastResendAt");
-            if (last instanceof Timestamp &&
-                Date.now() - last.toMillis() < 60000) {
-              throw new HttpsError("resource-exhausted", "Retry later.");
-            }
-            tx.update(ref, {lastResendAt: FieldValue.serverTimestamp()});
-            return reg.data();
-          });
-          return {notified: await notify(db, id, regId, data)};
+          return {notified: await retryDecision(db, ref, "activityId", id)};
         }),
   };
 }

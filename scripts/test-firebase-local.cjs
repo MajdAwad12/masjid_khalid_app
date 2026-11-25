@@ -67,6 +67,9 @@ async function main() {
     });
     const token=await login(baseEmail,firstPass);
     check((await listUsers(token)).status===200,'active administrator may list users');
+    await require('./test-registration-privacy-local.cjs').testRegistrationPrivacy({
+      db, call, token, apiRoot: `http://${HOST}:8080/v1/projects/${PROJECT}/databases/(default)/documents`,
+    });
     check((await call('createAdminAccount',{username:`a${stamp}`.slice(0,20),password:firstPass})).status>=400,
       'unauthenticated cannot create admin');
     const username=`q${stamp.replace(/[^a-z0-9_]/g,'')}`.slice(0,20);
@@ -88,6 +91,10 @@ async function main() {
     check((await auth.getUser(uid)).disabled===true,'deactivated admin is disabled in Auth');
     check((await db.collection('users').doc(uid).get()).data()?.role==='disabled','deactivated admin profile is disabled');
     check((await listUsers(secondToken)).status>=400,'stale token cannot list users after role revocation');
+    for (const kind of ['Course','Activity']) {
+      const stale = await call('manage'+kind+'Registration',{action:'erase'},secondToken);
+      check(stale.status===403,'revoked staff cannot manage '+kind+' registrations');
+    }
     check((await listUsers(token)).status===200,'remaining admin retains access');
     const recovery = db.collection('security_admin_recovery_emails').doc(admin.uid);
     const owner = db.collection('security_admin_recovery_email_owners').doc(stamp);

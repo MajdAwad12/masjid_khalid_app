@@ -40,8 +40,9 @@ class ActivityItem {
   });
 
   factory ActivityItem.fromDocument(
-    DocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    Map<String, dynamic>? counts,
+  }) {
     final d = doc.data() ?? <String, dynamic>{};
     DateTime? date(String key) {
       final value = d[key];
@@ -63,9 +64,9 @@ class ActivityItem {
       capacity: rawCapacity is num && rawCapacity > 0
           ? rawCapacity.toInt()
           : null,
-      acceptedCount: (d['acceptedCount'] as num?)?.toInt() ?? 0,
-      pendingCount: (d['pendingCount'] as num?)?.toInt() ?? 0,
-      rejectedCount: (d['rejectedCount'] as num?)?.toInt() ?? 0,
+      acceptedCount: (counts?['acceptedCount'] as num?)?.toInt() ?? 0,
+      pendingCount: (counts?['pendingCount'] as num?)?.toInt() ?? 0,
+      rejectedCount: (counts?['rejectedCount'] as num?)?.toInt() ?? 0,
       registrationMode: (d['registrationMode'] ?? 'approval').toString(),
       isOpen: d['isOpen'] == true,
       isVisible: d['isVisible'] == true,

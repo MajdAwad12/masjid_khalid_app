@@ -1,3 +1,6 @@
+import '../auth/auth_gate.dart';
+import '../widgets/registration_privacy_actions.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -26,7 +29,7 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
     _stream = FirebaseFirestore.instance
         .collection('course_registrations')
         .where('courseId', isEqualTo: widget.course.id)
-        .snapshots();
+        .snapshots(includeMetadataChanges: true);
     // Upgrade counters in legacy courses from the actual registration records.
     if (widget.course.rejectedCount == 0) {
       _ensureCounts();
@@ -36,10 +39,10 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
   Future<void> _ensureCounts() async {
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('courses')
+          .collection('course_counts')
           .doc(widget.course.id)
           .get();
-      if (doc.exists && !(doc.data()?.containsKey('rejectedCount') ?? false)) {
+      if (!doc.exists) {
         await CoursesService.reconcileCounts(widget.course.id);
       }
     } catch (_) {
@@ -159,13 +162,35 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AuthGate(
+    appBuilder: (isAdmin) => isAdmin
+        ? _roster(context)
+        : Scaffold(
+            appBar: AppBar(),
+            body: const Center(
+              child: Text(
+                'يلزم اتصال بالخادم وصلاحية إدارة نشطة لعرض القائمة.',
+              ),
+            ),
+          ),
+  );
+
+  Widget _roster(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('إدارة المسجلين')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: _stream,
         builder: (context, snapshot) {
+          if (snapshot.hasData &&
+              !serverConfirmedStaffData(
+                fromCache: snapshot.data!.metadata.isFromCache,
+                pendingWrites: snapshot.data!.metadata.hasPendingWrites,
+              )) {
+            return const Center(
+              child: Text('يلزم اتصال بالخادم لعرض بيانات المشاركين.'),
+            );
+          }
           final registrations = snapshot.data?.docs.toList() ?? [];
           registrations.sort((a, b) {
             final aTime = a.data()['createdAt'];
@@ -310,7 +335,11 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
                                 runSpacing: 7,
                                 children: [
                                   CourseStatusBadge(
-                                    label: status == 'accepted'
+                                    label: status == 'unverified'
+                                        ? 'بانتظار التحقق'
+                                        : status == 'withdrawn'
+                                        ? 'منسحب'
+                                        : status == 'accepted'
                                         ? 'تم قبول الطلب'
                                         : status == 'rejected'
                                         ? 'تم رفض الطلب'
@@ -351,7 +380,20 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: [
-                                  if (status != 'accepted')
+                                  RegistrationPrivacyActions(
+                                    key: ValueKey(doc.id),
+                                    course: true,
+                                    parentId: widget.course.id,
+                                    registrationId: doc.id,
+                                    name: name,
+                                    needsVerification:
+                                        data['deviceKeyHash'] != null &&
+                                        data['deviceVerified'] != true,
+                                    withdrawn: status == 'withdrawn',
+                                  ),
+                                  if (status != 'accepted' &&
+                                      status != 'unverified' &&
+                                      status != 'withdrawn')
                                     FilledButton.icon(
                                       onPressed: _busyId == null
                                           ? () => _decide(doc.id, 'accepted')
@@ -359,7 +401,9 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
                                       icon: const Icon(Icons.check_outlined),
                                       label: const Text('قبول'),
                                     ),
-                                  if (status != 'rejected')
+                                  if (status != 'rejected' &&
+                                      status != 'unverified' &&
+                                      status != 'withdrawn')
                                     OutlinedButton.icon(
                                       onPressed: _busyId == null
                                           ? () => _decide(doc.id, 'rejected')
@@ -367,7 +411,12 @@ class _CourseRegistrationsPageState extends State<CourseRegistrationsPage> {
                                       icon: const Icon(Icons.close_outlined),
                                       label: const Text('رفض'),
                                     ),
-                                  if (status != 'pending' &&
+                                  if ([
+                                        'accepted',
+                                        'rejected',
+                                        'withdrawn',
+                                      ].contains(status) &&
+                                      data['notificationState'] != 'sent' &&
                                       data['fcmToken'] is String &&
                                       (data['fcmToken'] as String).isNotEmpty)
                                     TextButton.icon(
@@ -451,6 +500,7 @@ class _ManualCourseParticipantDialogState
                   ),
                 ),
                 const SizedBox(height: 15),
+                const Text(guardianNotice),
                 TextFormField(
                   controller: _name,
                   maxLength: 80,

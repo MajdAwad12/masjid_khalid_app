@@ -1,3 +1,5 @@
+import '../widgets/registration_privacy_actions.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../models/activity_item.dart';
@@ -58,14 +60,14 @@ class _ActivityRegistrationDialogState
         if (!mounted || agree != true) return;
       }
       final key = await notifications.deviceKey();
-      final status = await ActivitiesService.register(
+      await ActivitiesService.register(
         activityId: widget.activity.id,
         fullName: _name.text,
         phone: _phone.text,
         deviceKey: key,
         fcmToken: token,
       );
-      if (mounted) Navigator.pop(context, status);
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -101,6 +103,7 @@ class _ActivityRegistrationDialogState
                 'لا تحتاج إلى حساب. يمكنك تسجيل نفسك أو أحد أفراد أسرتك.',
               ),
               const SizedBox(height: 16),
+              const Text(guardianNotice),
               TextFormField(
                 controller: _name,
                 maxLength: 80,

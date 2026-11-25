@@ -10,7 +10,13 @@ const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const {onDocumentDeleted} = require("firebase-functions/v2/firestore");
 const {deleteLinkedRegistrations} = require("./deletion_cleanup");
 const {FieldValue, Timestamp} = require("firebase-admin/firestore");
-const {getMessaging} = require("firebase-admin/messaging");
+const {staffRegistrationAction, verificationReference, verifiedPage, syncPage,
+  newDecision, deliverDecision, retryDecision, recoverDecisionUpdates,
+  recoverDecisionCreates} =
+    require("./registration_privacy");
+const {countsRef, changeSeats, unverifiedDevice, initialRegistration,
+  installationAllowance} =
+    require("./registration_capacity");
 const logger = require("firebase-functions/logger");
 
 const hash = (value) => crypto.createHash("sha256")
@@ -84,34 +90,6 @@ function personRegistrationId(courseId, phone, fullName) {
       canonicalName(fullName));
 }
 
-/** Count historical rejected registrations if course lacks rejectedCount. */
-async function rejectedCountInTransaction(tx, db, courseSnap) {
-  const stored = courseSnap.get("rejectedCount");
-  if (Number.isInteger(stored) && stored >= 0) return stored;
-  const results = await tx.get(db.collection("course_registrations")
-      .where("courseId", "==", courseSnap.id));
-  return results.docs.filter((doc) => doc.get("status") === "rejected")
-      .length;
-}
-
-/** Update the three persisted state counters atomically with one decision. */
-async function updateStateCounters(tx, db, course, courseRef,
-    fromState, toState) {
-  const accepted = Number(course.get("acceptedCount")) || 0;
-  const pending = Number(course.get("pendingCount")) || 0;
-  const rejected = await rejectedCountInTransaction(tx, db, course);
-  const next = {acceptedCount: accepted, pendingCount: pending,
-    rejectedCount: rejected};
-  if (registrationStates.includes(fromState)) {
-    const field = `${fromState}Count`;
-    next[field] = Math.max(0, next[field] - 1);
-  }
-  if (registrationStates.includes(toState)) {
-    next[`${toState}Count`] += 1;
-  }
-  tx.update(courseRef, next);
-}
-
 /** Validate a server-generated course document ID. */
 function requireCourseId(value) {
   if (typeof value !== "string" || !/^[a-zA-Z0-9]{10,40}$/.test(value)) {
@@ -141,7 +119,7 @@ async function rateLimitPublicRegistration(db, request, deviceKeyHash) {
   const limits = [
     {id: hash(`course-ip\0${ip}\0${hourlyWindow}`), max: 60},
     {id: hash(`course-device-limit\0${deviceKeyHash}\0${hourlyWindow}`),
-      max: 8},
+      max: installationAllowance.course},
   ];
   const refs = limits.map((item) => db.collection(
       "security_course_registration_limits").doc(item.id));
@@ -214,65 +192,18 @@ function parseCourse(data) {
   };
 }
 
-/** Send an FCM decision notification; record delivery request status. */
-async function sendDecision(db, courseId, registrationId, registration) {
-  const ref = db.collection("course_registrations").doc(registrationId);
-  const token = registration.fcmToken;
-  if (typeof token !== "string" || !token) {
-    await ref.update({notificationState: "no-token"});
-    return false;
-  }
-  const accepted = registration.status === "accepted";
-  const title = accepted ? "تم قبول تسجيلك في الدورة" :
-    "تم رفض طلب التسجيل في الدورة";
-  const body = accepted ? "يسعدنا انضمامك إلى الدورة. أهلاً بك!" :
-    "نعتذر، لم تتم الموافقة على طلب تسجيلك.";
-  try {
-    await getMessaging().send({
-      token,
-      notification: {title, body},
-      data: {type: "course_decision", courseId, registrationId,
-        status: registration.status},
-      android: {priority: "high"},
-      apns: {payload: {aps: {sound: "default"}}},
-    });
-    await ref.update({notificationState: "sent",
-      notifiedAt: FieldValue.serverTimestamp()});
-    return true;
-  } catch (error) {
-    logger.warn("Course decision push failed", {
-      registrationId, code: error.code || "unknown",
-    });
-    await ref.update({notificationState: "failed"});
-    return false;
-  }
-}
-
-/** Once a late/rotated token becomes available, recover an unsent decision.
- * The transaction prevents concurrent sync calls from duplicating the send.
- * FCM remains best-effort; its acknowledgement is not device delivery proof.
- */
-async function recoverCourseDecision(db, ref, fcmToken) {
-  const registration = await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || snap.get("fcmToken") !== fcmToken ||
-        !["accepted", "rejected"].includes(snap.get("status")) ||
-        !["no-token", "failed"].includes(snap.get("notificationState")) ||
-        snap.get("decidedBy") === "automatic") {
-      return null;
-    }
-    tx.update(ref, {notificationState: "sending"});
-    return snap.data();
-  });
-  if (!registration) return false;
-  return sendDecision(db, registration.courseId, ref.id, registration);
-}
-
 /** Bind all course Cloud Functions to the existing admin checker and DB. */
 function makeCourseFunctions({db, requireAdmin}) {
   return {
     // Idempotent one-time upgrade: existing courses remain public by default.
     // Administrator-only, invoked when the admin first opens the courses tab.
+    notifyAutomaticCourseDecision: recoverDecisionCreates(db,
+        "course_registrations"),
+    recoverCourseDecisionDelivery: recoverDecisionUpdates(db,
+        "course_registrations"),
+    manageCourseRegistration: staffRegistrationAction({db, requireAdmin,
+      kind: "course", parentId: requireCourseId, regId: requireRegistrationId,
+    }),
     initializeCourseVisibility: onCall({region: "us-central1",
       maxInstances: 2, timeoutSeconds: 120}, async (request) => {
       await requireAdmin(request);
@@ -336,7 +267,6 @@ function makeCourseFunctions({db, requireAdmin}) {
             } else {
               tx.create(ref, {...validated,
                 isVisible: validated.isVisible ?? true,
-                acceptedCount: 0, pendingCount: 0, rejectedCount: 0,
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 createdBy: adminUid, updatedBy: adminUid});
@@ -358,6 +288,7 @@ function makeCourseFunctions({db, requireAdmin}) {
             if (!course.exists) {
               throw new HttpsError("not-found", "Course not found.");
             }
+            tx.delete(countsRef(db, "course", ref.id));
             tx.delete(ref);
           });
           return {deleted: true};
@@ -400,14 +331,8 @@ function makeCourseFunctions({db, requireAdmin}) {
             const [course, existing, legacy] = await Promise.all([
               tx.get(courseRef), tx.get(registrationRef), tx.get(legacyRef),
             ]);
-            if (existing.exists || (legacy.exists &&
-                canonicalName(legacy.get("fullName") || "") ===
-                    canonicalName(fullName))) {
-              throw new HttpsError("already-exists",
-                  "This person is already registered for the course.");
-            }
             if (!course.exists || course.get("isOpen") !== true ||
-                course.get("isVisible") === false) {
+                course.get("isVisible") !== true) {
               throw new HttpsError("failed-precondition",
                   "Course is unavailable for registration.");
             }
@@ -417,27 +342,24 @@ function makeCourseFunctions({db, requireAdmin}) {
               throw new HttpsError("failed-precondition",
                   "Course registration has closed.");
             }
-            const accepted = Number(course.get("acceptedCount")) || 0;
-            const pending = Number(course.get("pendingCount")) || 0;
-            const capacity = course.get("capacity");
-            if (typeof capacity === "number" && capacity > 0 &&
-                accepted + pending >= capacity) {
-              throw new HttpsError("resource-exhausted", "Course is full.");
+            if (existing.exists || (legacy.exists &&
+                canonicalName(legacy.get("fullName") || "") ===
+                    canonicalName(fullName))) {
+              return {status: "submitted"};
             }
-            const isAuto = course.get("registrationMode") === "automatic";
-            const status = isAuto ? "accepted" : "pending";
+            const status = course.get("registrationMode") === "automatic" ?
+              "accepted" : "pending";
+            if (!await changeSeats(tx, course, null, status,
+                {device: deviceKeyHash, publicSubmission: true})) {
+              return {status: "submitted"};
+            }
             tx.create(registrationRef, {
               courseId, courseTitle: course.get("title") || "",
               fullName, phone, deviceKeyHash, fcmToken,
-              status, removed: false, notificationState: "not-sent",
+              ...initialRegistration(status), removed: false,
               createdAt: FieldValue.serverTimestamp(),
-              decidedAt: isAuto ? FieldValue.serverTimestamp() : null,
-              decidedBy: isAuto ? "automatic" : null,
             });
-            tx.update(courseRef, isAuto ? {
-              acceptedCount: FieldValue.increment(1),
-            } : {pendingCount: FieldValue.increment(1)});
-            return {registrationId: regId, status};
+            return {status: "submitted"};
           });
           return result;
         }),
@@ -479,14 +401,14 @@ function makeCourseFunctions({db, requireAdmin}) {
         if (previousState === "accepted") {
           throw new HttpsError("already-exists", "Already enrolled.");
         }
-        await updateStateCounters(tx, db, course, courseRef,
-            previousState, "accepted");
+        await changeSeats(tx, course,
+            previousState, "accepted", {device: unverifiedDevice(existing)});
         if (existing) {
           tx.update(regRef, {
             fullName, courseTitle: course.get("title") || "",
             status: "accepted", removed: false, decidedBy: adminUid,
             decidedAt: FieldValue.serverTimestamp(),
-            notificationState: "sending", updatedBy: adminUid,
+            ...newDecision(), updatedBy: adminUid,
           });
         } else {
           tx.create(regRef, {
@@ -503,45 +425,24 @@ function makeCourseFunctions({db, requireAdmin}) {
         return {registrationId: regRef.id,
           prior: existing ? existing.data() : null};
       });
-      const notified = result.prior?.fcmToken ?
-        await sendDecision(db, courseId, result.registrationId,
-            {...result.prior, status: "accepted"}) : false;
+      const notified = Boolean(result.prior) && await deliverDecision(db,
+          db.collection("course_registrations").doc(result.registrationId));
       return {registrationId: result.registrationId, notified};
     }),
 
     // The 256-bit per-installation key authorizes updating ONLY notification
-    // destinations and reading status summaries; no PII is returned.
-    syncCourseDeviceToken: onCall({region: "us-central1", maxInstances: 10},
-        async (request) => {
-          const deviceKeyHash = validDeviceKey(request.data?.deviceKey);
-          const fcmToken = validToken(request.data?.fcmToken);
-          if (!fcmToken) {
-            throw new HttpsError("invalid-argument", "Token required.");
-          }
-          const snapshots = await db.collection("course_registrations")
-              .where("deviceKeyHash", "==", deviceKeyHash).limit(100).get();
-          const batch = db.batch();
-          let updated = 0;
-          for (const item of snapshots.docs) {
-            if (registrationStates.includes(item.get("status")) &&
-                item.get("fcmToken") !== fcmToken) {
-              batch.update(item.ref, {fcmToken});
-              updated++;
-            }
-          }
-          if (updated > 0) await batch.commit();
-          // A decision could have been made before APNs/FCM returned a token.
-          // Recover it on the next token sync without an admin resend.
-          let recovered = 0;
-          for (const item of snapshots.docs) {
-            if (!["no-token", "failed"].includes(
-                item.get("notificationState"))) continue;
-            if (await recoverCourseDecision(db, item.ref, fcmToken)) {
-              recovered++;
-            }
-          }
-          return {updated, recovered};
-        }),
+    // destinations and reading staff-verified status summaries.
+    syncCourseDeviceToken: onCall({region: "us-central1", maxInstances: 10,
+      timeoutSeconds: 300},
+    async (request) => {
+      const deviceKeyHash = validDeviceKey(request.data?.deviceKey);
+      const fcmToken = validToken(request.data?.fcmToken);
+      if (!fcmToken) {
+        throw new HttpsError("invalid-argument", "Token required.");
+      }
+      return syncPage(db, "course_registrations", deviceKeyHash,
+          fcmToken);
+    }),
 
     // The unguessable per-installation key grants the registering device
     // read access to the NAMES it submitted and their latest statuses.
@@ -549,8 +450,8 @@ function makeCourseFunctions({db, requireAdmin}) {
     myCourseRegistrations: onCall({region: "us-central1", maxInstances: 10},
         async (request) => {
           const deviceKeyHash = validDeviceKey(request.data?.deviceKey);
-          const snapshots = await db.collection("course_registrations")
-              .where("deviceKeyHash", "==", deviceKeyHash).limit(100).get();
+          const snapshots = await verifiedPage(db, "course_registrations",
+              deviceKeyHash, request.data?.cursor);
           const courseIds = [...new Set(snapshots.docs
               .map((item) => item.get("courseId"))
               .filter((id) => typeof id === "string" &&
@@ -562,14 +463,17 @@ function makeCourseFunctions({db, requireAdmin}) {
               currentTitles.set(courseId, course.get("title") || "");
             }
           }));
-          return {registrations: snapshots.docs.map((item) => ({
-            courseId: item.get("courseId"),
-            courseTitle: currentTitles.get(item.get("courseId")) ||
+          return {reference: verificationReference(deviceKeyHash),
+            nextCursor: snapshots.nextCursor,
+            registrations: snapshots.docs.map((item) => ({
+              deviceVerified: true,
+              courseId: item.get("courseId"),
+              courseTitle: currentTitles.get(item.get("courseId")) ||
               item.get("courseTitle") || "",
-            fullName: item.get("fullName") || "",
-            status: item.get("status"),
-            registrationId: item.id,
-          }))};
+              fullName: item.get("fullName") || "",
+              status: item.get("status"),
+              registrationId: item.id,
+            }))};
         }),
 
     // Admin can correct a prior decision, including accepted -> rejected.
@@ -603,17 +507,17 @@ function makeCourseFunctions({db, requireAdmin}) {
           return {changed: false, registration: registration.data()};
         }
         if (previousState !== data.decision) {
-          await updateStateCounters(tx, db, course, courseRef,
-              previousState, data.decision);
+          await changeSeats(tx, course,
+              previousState, data.decision,
+              {device: unverifiedDevice(registration)});
         }
         tx.update(regRef, {status: data.decision, removed: false,
           decidedAt: FieldValue.serverTimestamp(), decidedBy: adminUid,
-          notificationState: "sending", updatedBy: adminUid});
+          ...newDecision(), updatedBy: adminUid});
         return {changed: true,
           registration: {...registration.data(), status: data.decision}};
       });
-      const notified = decision.changed ? await sendDecision(db, courseId,
-          registrationId, decision.registration) : false;
+      const notified = decision.changed && await deliverDecision(db, regRef);
       return {notified, changed: decision.changed};
     }),
 
@@ -629,17 +533,8 @@ function makeCourseFunctions({db, requireAdmin}) {
         if (!course.exists) {
           throw new HttpsError("not-found", "Course not found.");
         }
-        const snapshot = await tx.get(db.collection("course_registrations")
-            .where("courseId", "==", courseId));
-        const totals = {acceptedCount: 0, pendingCount: 0,
-          rejectedCount: 0};
-        for (const doc of snapshot.docs) {
-          const state = doc.get("status");
-          if (registrationStates.includes(state)) {
-            totals[`${state}Count`] += 1;
-          }
-        }
-        tx.update(courseRef, totals);
+        const totals = await changeSeats(tx, course, null, null,
+            {recount: true});
         return {...totals};
       });
     }),
@@ -652,23 +547,8 @@ function makeCourseFunctions({db, requireAdmin}) {
               request.data?.registrationId);
           const regRef = db.collection("course_registrations")
               .doc(registrationId);
-          const registration = await db.runTransaction(async (tx) => {
-            const snapshot = await tx.get(regRef);
-            if (!snapshot.exists || snapshot.get("courseId") !== courseId ||
-                !["accepted", "rejected"].includes(snapshot.get("status"))) {
-              throw new HttpsError("failed-precondition", "No final decision.");
-            }
-            const last = snapshot.get("lastResendAt");
-            if (last instanceof Timestamp &&
-                Date.now() - last.toMillis() < 60000) {
-              throw new HttpsError("resource-exhausted", "Retry in a minute.");
-            }
-            tx.update(regRef, {lastResendAt: FieldValue.serverTimestamp(),
-              notificationState: "sending"});
-            return snapshot.data();
-          });
-          const notified = await sendDecision(db, courseId,
-              registrationId, registration);
+          const notified = await retryDecision(db, regRef,
+              "courseId", courseId);
           return {notified};
         }),
   };

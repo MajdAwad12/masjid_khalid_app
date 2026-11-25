@@ -1,3 +1,5 @@
+import 'registration_privacy.dart';
+
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/course.dart';
@@ -51,21 +53,20 @@ class CoursesService {
     return (result['updated'] as num?)?.toInt() ?? 0;
   }
 
-  static Future<String> register({
+  static Future<void> register({
     required String courseId,
     required String fullName,
     required String phone,
     required String deviceKey,
     String? fcmToken,
   }) async {
-    final response = await _functions.httpsCallable('registerForCourse').call({
+    await submitRegistration('registerForCourse', {
       'courseId': courseId,
       'fullName': fullName.trim(),
       'phone': phone.trim(),
       'deviceKey': deviceKey,
       'fcmToken': fcmToken,
     });
-    return Map<String, dynamic>.from(response.data as Map)['status'] as String;
   }
 
   // Admin only. Manual additions bypass the public enrollment window and
@@ -121,23 +122,10 @@ class CoursesService {
   static Future<void> syncToken({
     required String deviceKey,
     required String token,
-  }) async {
-    await _functions.httpsCallable('syncCourseDeviceToken').call({
-      'deviceKey': deviceKey,
-      'fcmToken': token,
-    });
-  }
+  }) => syncRegistrationToken('syncCourseDeviceToken', deviceKey, token);
 
-  static Future<List<Map<String, dynamic>>> myRegistrations(
-    String deviceKey,
-  ) async {
-    final response = await _functions
-        .httpsCallable('myCourseRegistrations')
-        .call({'deviceKey': deviceKey});
-    final result = Map<String, dynamic>.from(response.data as Map);
-    final items = result['registrations'] as List? ?? [];
-    return items.map((item) => Map<String, dynamic>.from(item as Map)).toList();
-  }
+  static Future<RegistrationInbox> myRegistrations(String deviceKey) =>
+      readRegistrationInbox('myCourseRegistrations', deviceKey);
 
   static String errorMessage(Object error) {
     if (error is FirebaseFunctionsException) {
