@@ -269,15 +269,27 @@ class _CourseCard extends StatelessWidget {
 
     return MosqueCardShell(
       accent: MosquePalette.ocean,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(height: 5, color: MosquePalette.ocean),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      child: IntrinsicHeight(
+        child: Row(
+          textDirection: TextDirection.rtl,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 6,
+              decoration: BoxDecoration(
+                color: MosquePalette.ocean,
+                borderRadius: const BorderRadiusDirectional.only(
+                  topStart: Radius.circular(22),
+                  bottomStart: Radius.circular(22),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -407,10 +419,12 @@ class _CourseCard extends StatelessWidget {
                       ),
                     ),
                 ],
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -579,3 +593,4 @@ class _MyCourseRegistrationsDialogState
     );
   }
 }
+

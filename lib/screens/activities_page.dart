@@ -206,15 +206,27 @@ class _ActivityCard extends StatelessWidget {
     final full = item.isFull;
     return MosqueCardShell(
       accent: accent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(height: 5, color: accent),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      child: IntrinsicHeight(
+        child: Row(
+          textDirection: TextDirection.rtl,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 6,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: const BorderRadiusDirectional.only(
+                  topStart: Radius.circular(22),
+                  bottomStart: Radius.circular(22),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -417,10 +429,12 @@ class _ActivityCard extends StatelessWidget {
                       ),
                     ),
                 ],
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -538,3 +552,4 @@ class _MyActivityRegistrationsDialogState
     ],
   );
 }
+

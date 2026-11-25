@@ -213,15 +213,27 @@ class AnnouncementCard extends StatelessWidget {
 
     return MosqueCardShell(
       accent: MosquePalette.amber,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(height: 5, color: MosquePalette.amber),
-          Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      child: IntrinsicHeight(
+        child: Row(
+          textDirection: TextDirection.rtl,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 6,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFD700),
+                borderRadius: const BorderRadiusDirectional.only(
+                  topStart: Radius.circular(22),
+                  bottomStart: Radius.circular(22),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 if (isImportant || isAdmin) ...[
                   Row(
                     textDirection: TextDirection.rtl,
@@ -377,10 +389,12 @@ class AnnouncementCard extends StatelessWidget {
                     ),
                   ),
                 ],
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -744,3 +758,4 @@ class _AnnouncementEditorDialogState extends State<_AnnouncementEditorDialog> {
 bool _isOwnedImagePath(String announcementId, String path) {
   return path.startsWith('announcements/$announcementId/images/');
 }
+
