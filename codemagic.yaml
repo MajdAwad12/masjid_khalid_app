@@ -16,10 +16,8 @@ workflows:
           xcodebuild -version
       - name: Restore locked Flutter dependencies
         script: flutter pub get --enforce-lockfile
-      - name: Install iOS dependencies
-        script: |
-          cd ios
-          pod install
+      # This Flutter project uses Swift Package Manager, not CocoaPods.
+      # There is no ios/Podfile; Flutter/Xcode resolves SwiftPM dependencies.
       - name: Build unsigned iOS app (release)
         script: flutter build ios --release --no-codesign
       - name: Package unsigned IPA
