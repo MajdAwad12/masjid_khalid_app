@@ -34,3 +34,63 @@ workflows:
     artifacts:
       - build/ios/ipa_unsigned/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+  # Build an iOS release with Shorebird, WITHOUT Apple codesigning.
+  # The xcarchive is the authoritative input for future signing/export.
+  # The unsigned IPA is only an inspection/transport artifact and cannot be
+  # uploaded to App Store Connect or installed on ordinary iPhones.
+  ios-shorebird-unsigned:
+    name: Mosque iOS Shorebird - unsigned IPA and archive
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      flutter: '3.50.0'
+      xcode: '26.6'
+      groups:
+        - shorebird
+    scripts:
+      - name: Verify build environment
+        script: |
+          set -eu
+          flutter --version
+          xcodebuild -version
+          test -f shorebird.yaml
+      - name: Restore locked Flutter packages
+        script: flutter pub get --enforce-lockfile
+      - name: Install Shorebird CLI
+        script: |
+          set -eu
+          curl -fsSL https://shorebird.dev/install.sh | bash
+          echo "PATH=$HOME/.shorebird/bin:$PATH" >> "$CM_ENV"
+      - name: Create unsigned Shorebird iOS release archive
+        script: |
+          set -eu
+          if [ -z "${SHOREBIRD_TOKEN:-}" ]; then
+            echo "Missing SHOREBIRD_TOKEN: configure it as a secure Codemagic environment variable in the shorebird group."
+            exit 1
+          fi
+          shorebird --version
+          # Registers the iOS release on Shorebird, NOT on App Store Connect.
+          # No Apple signing, no automatic App Store or TestFlight publishing.
+          shorebird release ios --flutter-version=3.50.0 --no-codesign
+      - name: Package unsigned IPA and preserve signing archive
+        script: |
+          set -eu
+          ARCHIVE="build/ios/archive/Runner.xcarchive"
+          APP="$ARCHIVE/Products/Applications/Runner.app"
+          test -d "$ARCHIVE"
+          test -d "$APP"
+          OUT="$CM_BUILD_DIR/build/ios/shorebird_unsigned"
+          mkdir -p "$OUT"
+          TMP="$(mktemp -d)"
+          mkdir -p "$TMP/Payload"
+          ditto "$APP" "$TMP/Payload/Runner.app"
+          (cd "$TMP" && zip -qry "$OUT/masjid_khalid_shorebird_unsigned.ipa" Payload)
+          (cd build/ios/archive && ditto -c -k --keepParent Runner.xcarchive "$OUT/Runner.xcarchive.zip")
+          unzip -t "$OUT/masjid_khalid_shorebird_unsigned.ipa" > /dev/null
+          unzip -t "$OUT/Runner.xcarchive.zip" > /dev/null
+          ls -lh "$OUT"
+    artifacts:
+      - build/ios/shorebird_unsigned/*.ipa
+      - build/ios/shorebird_unsigned/*.zip
+      - /tmp/xcodebuild_logs/*.log
