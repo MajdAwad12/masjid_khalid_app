@@ -94,3 +94,61 @@ workflows:
       - build/ios/shorebird_unsigned/*.ipa
       - build/ios/shorebird_unsigned/*.zip
       - /tmp/xcodebuild_logs/*.log
+
+  # Started manually. Produces a Shorebird base release and local build artifacts.
+  ios-shorebird-app-store:
+    name: Mosque iOS Shorebird - signed App Store IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    inputs:
+      build_number:
+        description: Next unused iOS build number for this version in Apple and Shorebird
+        type: number
+    environment:
+      flutter: '3.50.0'
+      xcode: '26.6'
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.masjidkhalidbinwaleed.masjidKhalidApp
+      groups:
+        - shorebird
+        - ios_store
+    scripts:
+      - name: Check release inputs and restore locked packages
+        script: |
+          set -eu
+          : "${SHOREBIRD_TOKEN:?Configure the shorebird environment group}"
+          python3 scripts/ios_release.py check '${{ inputs.build_number }}'
+          flutter pub get --enforce-lockfile
+      - name: Apply App Store signing profile
+        script: |
+          xcode-project use-profiles --custom-export-options='{"destination":"export","manageAppVersionAndBuildNumber":false}'
+      - name: Build signed Shorebird base
+        script: |
+          set -eu
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          build_number='${{ inputs.build_number }}'
+          version="$(python3 scripts/ios_release.py prepare "$build_number" "$work/store-config.json")"
+          unset IOS_STORE_CONFIG_JSON
+          git clone --quiet --depth 1 --branch v1.6.149 https://github.com/shorebirdtech/shorebird.git "$work/shorebird"
+          "$work/shorebird/bin/shorebird" release ios --flutter-version=3.50.0 \
+            --build-name="$version" --build-number="$build_number" \
+            --dart-define-from-file="$work/store-config.json" \
+            --export-options-plist="$HOME/export_options.plist"
+      - name: Validate exported IPA and collect release artifacts
+        script: |
+          set -eu
+          python3 scripts/ios_release.py verify '${{ inputs.build_number }}'
+          archive=build/ios/archive/Runner.xcarchive
+          test -d "$archive/dSYMs/Runner.app.dSYM"
+          out="$(mktemp -d build/ios/release-artifacts.XXXXXX)"
+          ditto -c -k --keepParent "$archive" "$out/Runner.xcarchive.zip"
+          cp build/ios/ipa/*.ipa "$out/Runner.ipa"
+          (cd "$out" && shasum -a 256 Runner.ipa Runner.xcarchive.zip > SHA256SUMS)
+          test ! -e build/ios/verified
+          mv "$out" build/ios/verified
+    artifacts:
+      - build/ios/verified/Runner.ipa
+      - build/ios/verified/Runner.xcarchive.zip
+      - build/ios/verified/SHA256SUMS
